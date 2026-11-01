@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>大肥鱼</title>
+  <style>
+    html, body {
+        margin: 0;
+        overflow: hidden;
+    }
+    canvas {
+        width: 100vw;
+        height: 100vh;
+        display: block;
+    }
+  </style>
+  <!-- 错误收集（只存到 window.__errs，供外部用 /eval 读取；
+       不要写 document.title，否则窗口标题会被改成错误信息） -->
+  <script>
+    window.__errs = [];
+    window.addEventListener('error', function (e) {
+      window.__errs.push('ERR: ' + (e.message || e.error));
+    });
+    window.addEventListener('unhandledrejection', function (e) {
+      var r = e.reason;
+      window.__errs.push('REJ: ' + (r && r.message ? r.message : r) + ' || ' + ((r && r.stack) ? String(r.stack).slice(0, 400) : ''));
+    });
+  </script>
+  <!-- Live2DCubismCore script -->
+  <script src = "./Core/live2dcubismcore.js"></script>
+  <!-- Build script -->
+  <script src = "./src/main.ts" type="module"></script>
+</head>
+<body>
+</body>
+</html>

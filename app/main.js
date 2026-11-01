@@ -1,0 +1,951 @@
+// 大肥鱼桌宠主程序
+// ─────────────────────────────────────────────────────────
+// 1) 内置静态服务器（把 dist 发给窗口，不依赖 vite）
+// 2) 透明 / 无边框 / 置顶 / 不进任务栏 的窗口
+// 3) 逐像素命中的点击穿透：透明区域放行，点她身上才接管鼠标
+// 4) 可拖动（位置会记住），拖动时带动摆动
+// 5) 托盘图标（显示/隐藏、复位、退出）
+// 6) 本地控制接口（127.0.0.1:5011）：口型 / 参数 / 反应
+
+const { app, BrowserWindow, screen, Tray, Menu, ipcMain, nativeImage, session } = require('electron');
+const { createWindowState } = require('./shell/windowState');
+const pageCommand = require('./shell/pageCommand');
+const settingsStore = require('./shell/settingsStore');
+const settingsApply = require('./shell/settingsApply');
+const http = require('http');
+const fs = require('fs');
+const path = require('path');
+
+const ROOT = path.resolve(__dirname, '..');
+const DIST = path.join(ROOT, 'Demo', 'dist');
+// 语音文件目录（pet_voice.py 用 edge-tts 生成 mp3，这里发给页面播放）
+const AUDIO_DIR =
+  process.env.PET_AUDIO_DIR ||
+  'C:\\Users\\Administrator\\Documents\\deepseek-harness\\default-workspace\\dafeiyu-pet\\audio';
+const STATIC_PORT = 5010;
+const API_PORT = 5011;
+const LOG_PATH = path.join(__dirname, 'pet-shell.log');
+const POS_PATH = path.join(__dirname, 'pet-window.json');
+
+let win = null;
+// 待打字的文本队列：DSH 的打字插件会轮询 /pending 取走并写进输入框
+const textQueue = [];
+let tray = null;
+// 是否允许鼠标落在窗口上（拖动/点她）。默认 false = 整窗点击穿透，不打扰你。
+let interactive = process.argv.includes('--interactive');
+let interactiveTimer = null;   // 整窗交互的自动恢复定时器
+
+/** 调页面命令（参数走 JSON，唯一的手拼 JS 在 shell/pageCommand.js 里） */
+function cmd(name, args) {
+  return pageCommand.command(win, name, args);
+}
+/** 只给 /eval 调试通道用 */
+function runJs(js) {
+  return pageCommand.run(win, js);
+}
+
+function log() {
+  const line =
+    '[' + new Date().toISOString() + '] ' +
+    Array.prototype.map
+      .call(arguments, (a) => (typeof a === 'string' ? a : JSON.stringify(a)))
+      .join(' ') + '\n';
+  try { fs.appendFileSync(LOG_PATH, line); } catch (e) {}
+}
+
+function arg(name, fallback) {
+  const i = process.argv.indexOf('--' + name);
+  if (i >= 0 && process.argv[i + 1]) return process.argv[i + 1];
+  return fallback;
+}
+
+const MODEL = arg('model', '大肥鱼');
+const WIDTH = parseInt(arg('w', '420'), 10);
+const HEIGHT = parseInt(arg('h', '620'), 10);
+
+// 窗口几何的唯一真相。见 shell/windowState.js 的注释：
+// desiredW/H 只能由 geo.setSize() 改，拖动中不采信 resize，坐标对齐设备像素。
+let geo = null;
+
+function initGeometry() {
+  geo = createWindowState({
+    screen,
+    fs,
+    posPath: POS_PATH,
+    defaults: { width: WIDTH, height: HEIGHT },
+    log,
+  });
+  return geo;
+}
+
+// ── 拖动状态（几何/尺寸归 geo 管，这里只记拖动的起点和速度） ──────
+const drag = { active: false, sx: 0, sy: 0, wx: 0, wy: 0, lx: 0, ly: 0, lt: 0 };
+
+function savePos() {
+  if (geo) geo.savePos();
+}
+
+// ── 静态服务器 ────────────────────────────────────────────
+const MIME = {
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+  '.webp': 'image/webp', '.moc3': 'application/octet-stream',
+  '.frag': 'text/plain; charset=utf-8', '.vert': 'text/plain; charset=utf-8',
+  '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.ogg': 'audio/ogg',
+};
+
+function startStaticServer() {
+  http.createServer((req, res) => {
+    try {
+      let rel = decodeURIComponent((req.url || '/').split('?')[0]);
+      if (rel === '/' || rel === '') rel = '/index.html';
+
+      // /audio/xxx.mp3 → 语音目录（供页面 <audio> 播放）
+      if (rel.startsWith('/audio/')) {
+        const name = path.basename(rel);
+        const file = path.join(AUDIO_DIR, name);
+        if (!fs.existsSync(file)) { res.writeHead(404); res.end('no audio'); return; }
+        res.writeHead(200, {
+          'Content-Type': MIME[path.extname(file).toLowerCase()] || 'audio/mpeg',
+          'Cache-Control': 'no-store',
+          'Access-Control-Allow-Origin': '*',
+        });
+        fs.createReadStream(file).pipe(res);
+        return;
+      }
+
+      const full = path.join(DIST, rel);
+      if (!path.resolve(full).startsWith(path.resolve(DIST))) {
+        res.writeHead(403); res.end('forbidden'); return;
+      }
+      if (!fs.existsSync(full) || fs.statSync(full).isDirectory()) {
+        res.writeHead(404); res.end('not found'); return;
+      }
+      res.writeHead(200, {
+        'Content-Type': MIME[path.extname(full).toLowerCase()] || 'application/octet-stream',
+        'Cache-Control': 'no-store',
+        'Access-Control-Allow-Origin': '*',
+      });
+      fs.createReadStream(full).pipe(res);
+    } catch (e) {
+      res.writeHead(500); res.end('error');
+    }
+  }).listen(STATIC_PORT, '127.0.0.1', () => log('static on', STATIC_PORT));
+}
+
+// ── 窗口 ──────────────────────────────────────────────────
+// 允许页面使用摄像头/麦克风（透明桌宠窗口里 getUserMedia 需要显式放行）
+function allowMediaPermissions() {
+  try {
+    const ses = session.defaultSession;
+    ses.setPermissionRequestHandler((_wc, permission, callback) => {
+      log('permission request:', permission);
+      callback(true);
+    });
+    ses.setPermissionCheckHandler(() => true);
+  } catch (e) {
+    log('permission handler failed', String(e));
+  }
+}
+
+function createWindow() {
+  const bounds = geo.initialBounds();
+
+  win = new BrowserWindow({
+    title: '大肥鱼',
+    focusable: false,          // 永不抢键盘焦点：她在前台也不影响你打字
+    width: bounds.width,
+    height: bounds.height,
+    x: bounds.x,
+    y: bounds.y,
+    transparent: true,
+    frame: false,
+    hasShadow: false,
+    resizable: true,           // 允许拖窗口边缘缩放（几何对账已能吸收 1px 抖动，不再越拖越大）
+    useContentSize: false,
+    alwaysOnTop: true,
+    skipTaskbar: true,          // 后台运行：不占任务栏
+    show: false,                // 先不显示，等页面就绪再 showInactive（不抢焦点）
+    backgroundColor: '#00000000',
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      backgroundThrottling: false,
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+  geo.bind(win);
+
+  win.once('ready-to-show', () => {
+    if (win && !win.isDestroyed()) win.showInactive();   // 关键：inactive 显示，不抢焦点
+  });
+
+  win.setAlwaysOnTop(true, 'screen-saver');
+  // 默认整窗放行鼠标（不影响你点桌面）；需要拖她时用托盘菜单或 Ctrl+Alt+P 切换。
+  win.setIgnoreMouseEvents(!interactive, { forward: true });
+
+  win.loadURL(`http://127.0.0.1:${STATIC_PORT}/?model=${encodeURIComponent(MODEL)}`);
+
+  win.webContents.on('console-message', (_e, level, message) => {
+    if (level >= 2) log('[page]', message);
+  });
+  win.webContents.on('did-finish-load', () => log('page loaded'));
+
+  // 用户手动拖边缩放 → 交给 geo 对账（拖动中一律忽略，≤2px 抖动忽略）
+  let resizeSaveTimer = null;
+  win.on('resize', () => {
+    if (!win || win.isDestroyed()) return;
+    skipUntil = Date.now() + 600;   // 缩放期间不做命中检测（否则穿透开关会抖）
+    const r = geo.reconcile(win.getBounds(), { dragging: drag.active });
+    if (!r.changed) return;
+    if (resizeSaveTimer) clearTimeout(resizeSaveTimer);
+    resizeSaveTimer = setTimeout(() => {
+      try { savePos(); } catch (e) {}
+    }, 600);
+  });
+
+  win.on('closed', () => { win = null; });
+}
+
+// ── IPC：点击穿透 + 拖动 ──────────────────────────────────
+// ── 设置窗口 ──────────────────────────────────────────────
+let settingsWin = null;
+
+function openSettings() {
+  if (settingsWin && !settingsWin.isDestroyed()) {
+    settingsWin.show();
+    settingsWin.focus();
+    return;
+  }
+  settingsWin = new BrowserWindow({
+    width: 720,
+    height: 700,
+    minWidth: 640,
+    minHeight: 560,
+    title: '大肥鱼 · 设置',
+    backgroundColor: '#11151c',
+    autoHideMenuBar: true,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload-settings.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+  log('[settings] 创建窗口');
+  // 她自己是置顶窗口（screen-saver 层），设置窗口必须更高一层，否则会被压在后面
+  settingsWin.loadFile(path.join(__dirname, 'settings.html'));
+  try { settingsWin.setAlwaysOnTop(true, 'screen-saver'); } catch (e) {}
+  settingsWin.webContents.on('did-fail-load', (_e, code, desc) => log('[settings] 加载失败', code, desc));
+  settingsWin.on('closed', () => log('[settings] 窗口已关闭'));
+  settingsWin.once('ready-to-show', () => {
+    try { settingsWin.show(); settingsWin.focus(); settingsWin.moveTop(); } catch (e) {}
+  });
+  settingsWin.on('closed', () => { settingsWin = null; });
+}
+
+// 设置窗口需要的 IPC
+ipcMain.handle('settings:get', () => settingsStore.getSettings());
+ipcMain.handle('settings:set', (_e, patch) => {
+  try {
+    const next = settingsStore.setSettings(patch || {});
+    settingsApply.apply(win, next, log, { setRoam: (on) => { try { geo.setRoam(on); } catch (e) {} } });
+    // 只有音色这类启动时才读的配置需要重启；API 配置支持热重载
+    if (patch && patch.voice) settingsApply.restartBridge(log);
+    return { ok: true, settings: next };
+  } catch (err) {
+    log('[settings] 保存失败', String(err));
+    return { ok: false, error: String(err) };
+  }
+});
+ipcMain.handle('settings:test', async (_e, llm) => {
+  const https = require('https');
+  const http = require('http');
+  const store = settingsStore.getSettings();
+  const base = String((llm && llm.base_url) || store.llm.base_url || '').replace(/\/+$/, '');
+  const model = String((llm && llm.model) || store.llm.model || '');
+  let key = String((llm && llm.api_key) || store.llm.api_key || '').trim();
+  if (!key) key = String(process.env[(llm && llm.api_key_env) || store.llm.api_key_env] || '').trim();
+  if (!base) return { ok: false, error: '没有填接口地址' };
+  if (!key) return { ok: false, error: '没有可用的 API Key' };
+  const payload = JSON.stringify({
+    model, messages: [{ role: 'user', content: '只回两个字：你好' }],
+    max_tokens: 16, stream: false,
+  });
+  const url = new URL(base + '/chat/completions');
+  const lib = url.protocol === 'http:' ? http : https;
+  const t0 = Date.now();
+  return await new Promise((resolve) => {
+    const req = lib.request(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(payload),
+        Authorization: 'Bearer ' + key,
+      },
+      timeout: 30000,
+    }, (res) => {
+      let body = '';
+      res.on('data', (c) => { body += c; });
+      res.on('end', () => {
+        try {
+          const d = JSON.parse(body);
+          const txt = ((d.choices || [{}])[0].message || {}).content || '' ;
+          if (res.statusCode >= 200 && res.statusCode < 300) {
+            resolve({ ok: true, ms: Date.now() - t0, reply: String(txt).slice(0, 30) });
+          } else {
+            resolve({ ok: false, error: 'HTTP ' + res.statusCode + ' ' + body.slice(0, 160) });
+          }
+        } catch (e) {
+          resolve({ ok: false, error: '返回不是 JSON：' + body.slice(0, 120) });
+        }
+      });
+    });
+    req.on('timeout', () => { req.destroy(new Error('超时')); });
+    req.on('error', (e) => resolve({ ok: false, error: String(e.message || e) }));
+    req.write(payload);
+    req.end();
+  });
+});
+ipcMain.on('settings:close', () => {
+  if (settingsWin && !settingsWin.isDestroyed()) settingsWin.close();
+});
+
+function setupIpc() {
+  ipcMain.on('pet:ignore', (_e, ignore) => {
+    if (!win || win.isDestroyed()) return;
+    win.setIgnoreMouseEvents(!!ignore, { forward: true });
+  });
+
+  ipcMain.on('pet:scale', (_e, k) => {
+    const f = Number(k) || 1;
+    const g = geo.get();
+    applySize(g.w * f, g.h * f);
+  });
+
+  ipcMain.on('pet:drag-start', (_e, p) => {
+    if (!win || win.isDestroyed()) return;
+    const b = win.getBounds();
+    const g = geo.get();
+    drag.active = true;
+    drag.sx = p.x; drag.sy = p.y;
+    drag.wx = b.x; drag.wy = b.y;
+    drag.lx = p.x; drag.ly = p.y; drag.lt = Date.now();
+    log('[drag] start geo=', g.w, g.h);
+  });
+
+  ipcMain.on('pet:drag-move', (_e, p) => {
+    if (!win || win.isDestroyed() || !drag.active) return;
+    const g = geo.get();
+    let nx = drag.wx + (p.x - drag.sx);
+    let ny = drag.wy + (p.y - drag.sy);
+
+    // 别让她被拖丢：至少留 90px 在屏幕内（geo.moveTo 还会夹到工作区）
+    const d = screen.getPrimaryDisplay().workAreaSize;
+    const keep = 90;
+    nx = Math.max(-g.w + keep, Math.min(d.width - keep, nx));
+    ny = Math.max(0, Math.min(d.height - keep, ny));
+
+    // 几何交给 geo：一次 setBounds 同时钉住尺寸 + 坐标对齐设备像素
+    geo.moveTo(nx, ny);
+
+    // 速度回传给页面做摆动
+    const now = Date.now();
+    const dt = Math.max(1, now - drag.lt);
+    const vx = ((p.x - drag.lx) / dt) * 16;
+    const vy = ((p.y - drag.ly) / dt) * 16;
+    drag.lx = p.x; drag.ly = p.y; drag.lt = now;
+    win.webContents.send('pet:drag-info', { vx, vy });
+  });
+
+  ipcMain.on('pet:drag-end', () => {
+    drag.active = false;
+    if (win && !win.isDestroyed()) {
+      win.webContents.send('pet:drag-info', { vx: 0, vy: 0 });
+      savePos();
+    }
+  });
+}
+
+  // ── 右键菜单：设置 / 互动 ────────────────────────────────
+  ipcMain.on('pet:menu', () => {
+    if (!win || win.isDestroyed()) return;
+    const fire = (name, args) => cmd(name, args).catch(() => {});
+    const menu = Menu.buildFromTemplate([
+      {
+        label: '互动',
+        submenu: [
+          { label: '打个招呼', click: () => { fire('bubble', { text: '主人好呀～', seconds: 3 }); fire('react', { kind: 'happy' }); } },
+          { label: '说一句话（测试语音）', click: () => {
+              fetch('http://127.0.0.1:5011/play', { method: 'POST' }).catch(() => {});
+              fire('bubble', { text: '语音测试：你好，我是大肥鱼', seconds: 3 });
+              try { require('child_process').spawn('cmd', ['/c', 'start', '', 'http://127.0.0.1:5011/state'], { windowsHide: true }); } catch (e) {}
+            } },
+          { label: '摸摸头', click: () => { fire('expression', { name: '爱心眼', ms: 2500 }); fire('react', { kind: 'happy' }); } },
+        ],
+      },
+      {
+        label: '表情',
+        submenu: [
+          ...['脸红', '爱心眼', '＞＜', '兔牙', '屑屑眼', '圈圈眼', '黑脸', '流泪', '流冷汗'].map((n) => ({
+            label: n,
+            click: () => fire('expression', { name: n, ms: 3000 }),
+          })),
+          { type: 'separator' },
+          { label: '清除表情', click: () => fire('expression', { name: '', ms: 0 }) },
+        ],
+      },
+      {
+        label: '动作',
+        submenu: [
+          ...['举手', '放手', '竖手指开', '竖手指关', '狗尾草开', '狗尾草关'].map((g) => ({
+            label: g,
+            click: () => fire('motion', { group: g, no: 0 }),
+          })),
+        ],
+      },
+      { type: 'separator' },
+      { label: '设置…', click: () => openSettings() },
+      {
+        label: '大小',
+        submenu: [
+          { label: '小', click: () => applySize(360, 520) },
+          { label: '中', click: () => applySize(420, 620) },
+          { label: '大', click: () => applySize(520, 760) },
+          { label: '特大', click: () => applySize(640, 900) },
+        ],
+      },
+      {
+        label: '摄像头面捕',
+        type: 'checkbox',
+        checked: false,
+        click: (item) => fire('camera', { on: !!item.checked }),
+      },
+      { type: 'separator' },
+      { label: '隐藏（托盘可唤回）', click: () => { if (win) win.hide(); } },
+      { label: '打开配置目录', click: () => { try { require('electron').shell.openPath(__dirname); } catch (e) {} } },
+      { type: 'separator' },
+      { label: '退出', click: () => { app.quit(); } },
+    ]);
+    // 她的窗口是 focusable:false（不抢键盘焦点）。
+    // 原生菜单挂在不可聚焦的窗口上时，点别处**收不到消失事件**，菜单会一直杵着。
+    // 所以弹菜单期间临时允许聚焦，关掉再恢复。
+    let wasFocusable = true;
+    try { wasFocusable = win.isFocusable(); win.setFocusable(true); win.focus(); } catch (e) {}
+    const restore = () => {
+      try { if (!wasFocusable) win.setFocusable(false); } catch (e) {}
+    };
+    menu.once('menu-will-close', restore);
+    menu.popup({ window: win, callback: restore });
+  });
+// ── 几何看门狗 ────────────────────────────────────────────
+// 两个职责：
+//   1. drag.active 卡死时强制结束（丢了 mouseup / 合成事件 / 焦点丢失）
+//   2. 定期对账：OS 实际尺寸与 geo 基准差 >4px 就自愈，避免长期脱节
+let geoWatchTimer = null;
+function startGeometryWatchdog() {
+  if (geoWatchTimer) clearInterval(geoWatchTimer);
+  geoWatchTimer = setInterval(() => {
+    if (!win || win.isDestroyed() || !geo) return;
+    const now = Date.now();
+    // 拖动中但 1.5 秒没有任何 move → 判定卡死
+    if (drag.active && now - drag.lt > 1500) {
+      log('[drag] 看门狗：1.5s 无移动，强制结束拖动');
+      drag.active = false;
+      try { win.webContents.send('pet:drag-info', { vx: 0, vy: 0 }); } catch (e) {}
+    }
+    try { geo.ensureRoamBounds(); } catch (e) {}
+    const r = geo.assertConsistent(win.getBounds(), { dragging: drag.active });
+    if (!r.ok && r.reason === 'healed') {
+      try { savePos(); } catch (e) {}
+    }
+  }, 1500);
+}
+// ── 逐像素点击穿透 ────────────────────────────────────────
+// 主进程用「全局光标位置」轮询，问页面这个点是不是落在角色身上：
+//   落在身上 → 窗口接收鼠标（可拖动 / 可点她）
+//   透明区域 → 窗口放行鼠标（不影响你点桌面上的东西）
+//
+// 注意：setIgnoreMouseEvents 会让窗口重新合成一层，切换太频繁会"闪"。
+// 所以这里做了三道闸：光标没动不测、缩放期间不测、切换要连续确认。
+let ignoringNow = true;
+let lastIgnoreChange = 0;
+let pendingHit = null;
+let pendingCount = 0;
+let lastHitAt = 0;      // 上次命中检测时间（光标静止也要复测）
+let hitToken = 0;       // 丢弃过期的异步结果
+let skipUntil = 0;              // 窗口正在改尺寸的这段时间不做命中检测
+let lastCursor = { x: -1, y: -1 };
+let ignoreToggles = 0;          // 调试用：切换了多少次
+let hitTests = 0;               // 调试用：做了多少次命中检测
+
+function applyIgnore(next, force) {
+  if (!win || win.isDestroyed()) return;
+  const now = Date.now();
+  if (next === ignoringNow) {
+    pendingHit = null;
+    pendingCount = 0;
+    return;
+  }
+  if (!force) {
+    // 连续两次结果一致才切，而且两次切换至少隔 200ms
+    if (pendingHit !== next) {
+      pendingHit = next;
+      pendingCount = 1;
+      return;
+    }
+    pendingCount++;
+    if (pendingCount < 2) return;
+    if (now - lastIgnoreChange < 200) return;
+  }
+  ignoringNow = next;
+  lastIgnoreChange = now;
+  pendingHit = null;
+  pendingCount = 0;
+  ignoreToggles++;
+  win.setIgnoreMouseEvents(next, { forward: true });
+}
+
+function startHitTestLoop() {
+  setInterval(() => {
+    if (!win || win.isDestroyed() || !win.isVisible()) return;
+
+    // 拖动过程中始终保持可交互，避免鼠标滑出身体时丢掉 mouseup
+    if (drag.active) { applyIgnore(false, true); lastHitAt = Date.now(); return; }
+
+    // 托盘/热键的「允许整窗交互」（排障用，会让整块窗口吃掉鼠标）
+    if (interactive) { applyIgnore(false, true); lastHitAt = Date.now(); return; }
+
+    // 窗口正在缩放/移动：这期间坐标对不上，检测结果没意义，直接跳过
+    if (Date.now() < skipUntil) return;
+
+    const p = screen.getCursorScreenPoint();
+    const moved = p.x !== lastCursor.x || p.y !== lastCursor.y;
+    // 关键修复：以前「光标不动就 return」，导致状态永久冻结在"接收鼠标"，
+    // 结果是窗口变成一块挡板，她周围的东西全点不了。
+    // 现在即使光标不动，也每 250ms 复测一次。
+    if (!moved && Date.now() - lastHitAt < 250) return;
+    if (moved) lastCursor = { x: p.x, y: p.y };
+    lastHitAt = Date.now();
+
+    const b = win.getBounds();
+    const inWin = p.x >= b.x && p.x < b.x + b.width && p.y >= b.y && p.y < b.y + b.height;
+    if (!inWin) { applyIgnore(true); return; }
+
+    const cx = p.x - b.x;
+    const cy = p.y - b.y;
+    hitTests++;
+    const token = ++hitToken;
+    cmd('hitTest', { x: cx, y: cy })
+      .then((hit) => {
+        if (token !== hitToken) return;   // 有更新的一次检测了，丢弃旧结果
+        applyIgnore(!hit);
+      })
+      .catch(() => {
+        // 页面没响应时宁可放行鼠标：挡住整个桌面比点不到她严重得多
+        try { applyIgnore(true); } catch (e) {}
+      });
+  }, 60);
+}
+
+// ── 托盘 ──────────────────────────────────────────────────
+let sizeSaveTimer = null;
+function applySize(w, h) {
+  if (!geo) return;
+  // 夹取 / 等比 / 位置回拉 / 尺寸落盘，全部交给 windowState（唯一真相）
+  if (!geo.setSize(w, h)) return;
+  skipUntil = Date.now() + 600;
+  if (sizeSaveTimer) clearTimeout(sizeSaveTimer);
+  sizeSaveTimer = setTimeout(() => {
+    try { savePos(); } catch (e) {}
+  }, 800);
+}
+
+function applyInteractive() {
+  if (win && !win.isDestroyed()) {
+    win.setIgnoreMouseEvents(!interactive, { forward: true });
+  }
+  refreshTrayMenu();
+}
+
+function setInteractive(on) {
+  interactive = !!on;
+  applyInteractive();
+  ignoringNow = !interactive;   // 账目同步，别让 /debug 显示假的
+  log('interactive =', interactive);
+  // 整窗交互会让整块窗口吃掉鼠标（她周围的桌面点不了），所以 60 秒后自动回到穿透
+  if (interactiveTimer) clearTimeout(interactiveTimer);
+  if (interactive) {
+    interactiveTimer = setTimeout(() => {
+      if (interactive) {
+        setInteractive(false);
+        log('整窗交互 60 秒超时，已自动恢复点击穿透');
+      }
+    }, 60000);
+  }
+}
+
+function refreshTrayMenu() {
+  if (!tray) return;
+  tray.setContextMenu(Menu.buildFromTemplate([
+    {
+      label: interactive ? '⚠️ 整窗吞鼠标（60 秒后自动恢复穿透）' : '点击穿透（只在她身上接收鼠标）',
+      click: () => setInteractive(!interactive),
+    },
+    { type: 'separator' },
+    {
+      label: '摄像头面捕',
+      type: 'checkbox',
+      checked: false,
+      click: (item) => {
+        cmd('camera', { on: !!item.checked })
+          .then((r) => log('camera ->', JSON.stringify(r)))
+          .catch((e) => log('camera failed', String(e)));
+      },
+    },
+    { type: 'separator' },
+    { label: '设置…', click: () => openSettings() },
+    {
+      label: '大小',
+      submenu: [
+        { label: '小', click: () => applySize(360, 520) },
+        { label: '中', click: () => applySize(420, 620) },
+        { label: '大', click: () => applySize(520, 760) },
+        { label: '特大', click: () => applySize(640, 900) },
+      ],
+    },
+    { type: 'separator' },
+    {
+      label: '显示 / 隐藏',
+      click: () => {
+        if (!win) return createWindow();
+        if (win.isVisible()) win.hide(); else win.showInactive();
+      },
+    },
+    {
+      label: '回到右下角',
+      click: () => {
+        if (!win) return;
+        const d = screen.getPrimaryDisplay().workAreaSize;
+        const g = geo.get();
+        geo.moveTo(Math.max(0, d.width - g.w - 24), Math.max(0, d.height - g.h - 24));
+        savePos();
+      },
+    },
+    { type: 'separator' },
+    { label: '退出', click: () => app.quit() },
+  ]));
+}
+
+function setupTray() {
+  const icon = nativeImage.createFromDataURL(
+    'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAWklEQVR42mNgGAWjYBSMgv8MDAz/8WAOGAWjYBSMglEwCkbBKBgFo2AUjIJRMApGwSgYBaNgFIyCUTAKRsEoGAWjYBSMglEwCkbBKBgFo2AUjIJRMApGwSgYBQAAtQAB0n1l0wAAAABJRU5ErkJggg=='
+  );
+  try {
+    tray = new Tray(icon.isEmpty() ? nativeImage.createEmpty() : icon);
+  } catch (e) {
+    log('tray failed', String(e));
+    return;
+  }
+  tray.setToolTip('大肥鱼桌宠（托盘菜单可切换点击穿透）');
+  refreshTrayMenu();
+  log('tray ready');
+}
+
+// ── 控制接口 ──────────────────────────────────────────────
+function jsSet(params) {
+  const json = JSON.stringify(params || {});
+  return `(function(){window.__paramHold = window.__paramHold || {};var p=${json};` +
+    `for (var k in p) { window.__paramHold[k] = p[k]; } return Object.keys(window.__paramHold).length;})()`;
+}
+
+function startApiServer() {
+  http.createServer((req, res) => {
+    const url = (req.url || '/').split('?')[0];
+    // DSH 的打字插件在 web 页面里跨源调用这个 API，必须放行 CORS
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
+    const send = (code, obj) => {
+      res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*' });
+      res.end(JSON.stringify(obj));
+    };
+    const body = (cb) => {
+      let s = '';
+      req.on('data', (c) => { s += c; if (s.length > 1e6) req.destroy(); });
+      req.on('end', () => { try { cb(s ? JSON.parse(s) : {}); } catch (e) { send(400, { ok: false, error: 'bad json' }); } });
+    };
+
+    // 设置：GET 读当前配置，POST 打开设置窗口
+    // 应用设置（JSON 补丁）：界面和脚本都走这里
+    // 关闭设置窗口（脚本/测试用）
+    if (url === '/settings/close' && req.method === 'POST') {
+      try { if (settingsWin && !settingsWin.isDestroyed()) settingsWin.close(); } catch (e) {}
+      return send(200, { ok: true });
+    }
+
+    if (url === '/settings/apply' && req.method === 'POST') {
+      return body((d) => {
+        try {
+          const next = settingsStore.setSettings(d || {});
+          settingsApply.apply(win, next, log, { setRoam: (on) => { try { geo.setRoam(on); } catch (e) {} } });
+    // 只有音色这类启动时才读的配置需要重启；API 配置支持热重载
+          if (d && d.voice) settingsApply.restartBridge(log);
+          return send(200, { ok: true, settings: next });
+        } catch (err) {
+          return send(500, { ok: false, error: String(err) });
+        }
+      });
+    }
+
+    if (url === '/settings') {
+      if (req.method === 'POST') {
+        openSettings();
+        return send(200, { ok: true, opened: true });
+      }
+      return send(200, { ok: true, settings: settingsStore.getSettings(), windowOpen: !!settingsWin && !settingsWin.isDestroyed(), visible: !!settingsWin && !settingsWin.isDestroyed() && settingsWin.isVisible(), bounds: (settingsWin && !settingsWin.isDestroyed()) ? settingsWin.getBounds() : null });
+    }
+
+    if (url === '/state') {
+      return send(200, {
+        ok: true, model: MODEL,
+        windowOpen: !!win && !win.isDestroyed(),
+        visible: !!win && win.isVisible(),
+        size: (function () { const g = geo.get(); return [g.w, g.h]; })(),
+        staticPort: STATIC_PORT,
+      });
+    }
+    // 调试：返回页面里的交互状态（是否接管鼠标 / 拖动中 / 犯困）
+    if (url === '/debug') {
+      if (!win || win.isDestroyed()) return send(503, { ok: false, error: 'no window' });
+      return cmd('state')
+        .then((s) => send(200, {
+          ok: true,
+          pet: s,
+          main: {
+        hitTests,
+        ignoreToggles, ignoring: ignoringNow, interactive, dragging: drag.active },
+        }))
+        .catch((e) => send(500, { ok: false, error: String(e) }));
+    }
+    if (!win || win.isDestroyed()) return send(503, { ok: false, error: 'no window' });
+
+    if ((url === '/set') && req.method === 'POST') {
+      return body((d) => {
+        cmd('setParams', { params: d.params || d })
+          .then((n) => send(200, { ok: true, holding: n }))
+          .catch((e) => send(500, { ok: false, error: String(e) }));
+      });
+    }
+    if ((url === '/mouth' || url === '/say') && req.method === 'POST') {
+      return body((d) => {
+        const v = Math.max(0, Math.min(1, Number(d.open != null ? d.open : d.value || 0)));
+        cmd('mouth', { v })
+          .then(() => send(200, { ok: true, mouth: v }))
+          .catch((e) => send(500, { ok: false, error: String(e) }));
+      });
+    }
+    // 反应：surprise / happy / nod / shake / sleep / wake
+    if (url === '/react' && req.method === 'POST') {
+      return body((d) => {
+        const kind = String(d.kind || d.name || 'happy');
+        cmd('react', { kind })
+          .then((r) => send(200, { ok: true, kind, applied: !!r }))
+         .catch((e) => send(500, { ok: false, error: String(e) }));
+      });
+    }
+    // 调试：在页面里执行一段 JS（仅本机，用于自动化测试）
+    if (url === '/eval' && req.method === 'POST') {
+      return body((d) => {
+        const code = String(d.js || d.code || '');
+        if (!code) return send(400, { ok: false, error: 'empty js' });
+        runJs(code)
+          .then((r) => send(200, { ok: true, result: r }))
+          .catch((e) => send(500, { ok: false, error: String(e) }));
+      });
+    }
+    // 播放语音文件（pet_voice.py 用 edge-tts 合成好的 mp3），并同步显示气泡文字
+    if (url === '/play' && req.method === 'POST') {
+      return body((d) => {
+        const file = path.basename(String(d.file || ''));
+        const dur = Number(d.duration || 0);
+        const text = String(d.text || '');
+        if (!file) return send(400, { ok: false, error: 'no file' });
+        const src = '/audio/' + encodeURIComponent(file);
+        cmd('play', { src, duration: dur, text, dur: dur > 0 ? dur + 0.6 : 0 })
+          .then((r) => send(200, { ok: true, file, played: !!r, bubble: !!text }))
+         .catch((e) => send(500, { ok: false, error: String(e) }));
+      });
+    }
+    // 摄像头面捕开关
+    if (url === '/camera' && req.method === 'POST') {
+      return body((d) => {
+        const on = !!(d.on != null ? d.on : d.value);
+        cmd('camera', { on })
+          .then((r) => send(200, { ok: true, on, result: r }))
+          .catch((e) => send(500, { ok: false, error: String(e) }));
+      });
+    }
+    if (url === '/camera') {
+      return cmd('faceStatus')
+        .then((r) => send(200, { ok: true, status: r }))
+       .catch((e) => send(500, { ok: false, error: String(e) }));
+    }
+    // 插件回报日志（浏览器控制台我看不到，写进外壳日志方便排查）
+    if (url === '/log' && req.method === 'POST') {
+      return body((d) => {
+        log('[plugin]', String(d.msg || '').slice(0, 400));
+        return send(200, { ok: true });
+      });
+    }
+    // 文本队列：外部把要打的字放进队列，DSH 插件轮询取走
+    if (url === '/queue' && req.method === 'POST') {
+      return body((d) => {
+        const t = String(d.text || '');
+        if (d.clear) textQueue.push({ clear: true, at: Date.now() });
+        if (t) textQueue.push({ text: t, at: Date.now() });
+        return send(200, { ok: true, queued: textQueue.length });
+      });
+    }
+    if (url === '/pending') {
+      const item = textQueue.shift();
+      return send(200, { ok: true, text: item && item.text ? item.text : "", clear: !!(item && item.clear), left: textQueue.length });
+    }
+    // 调整窗口大小（页面 resize 后会自动重新适配角色）
+    if (url === '/size' && req.method === 'POST') {
+      return body((d) => {
+        const w = Number(d.w || d.width || 0);
+        const h = Number(d.h || d.height || 0);
+        if (!(w > 0 && h > 0)) return send(400, { ok: false, error: 'need w/h' });
+        applySize(w, h);
+        const g2 = geo.get(); return send(200, { ok: true, w: g2.w, h: g2.h });
+      });
+    }
+    // 移动窗口（不改尺寸），方便外部把她挪开
+    if (url === '/position' && req.method === 'POST') {
+      return body((d) => {
+        const x = Number(d.x), y = Number(d.y);
+        if (!Number.isFinite(x) || !Number.isFinite(y)) return send(400, { ok: false, error: 'need x/y' });
+        const p = geo.moveTo(x, y);
+        savePos();
+        return send(200, { ok: true, x: p.x, y: p.y });
+      });
+    }
+    // 小动作：摇头 / 点头 / 歪头 / 晃身子 / 晃脑袋
+    if (url === '/gesture' && req.method === 'POST') {
+      return body((d) => {
+        const kind = String(d.kind || d.name || '');
+        cmd('gesture', { kind })
+          .then((r) => send(200, { ok: true, kind, applied: !!r }))
+         .catch((e) => send(500, { ok: false, error: String(e) }));
+      });
+    }
+    // 表情 / 动作（模型自带 23 个表情 + 6 个手部动作）
+    if (url === '/expression' && req.method === 'POST') {
+      return body((d) => {
+        const name = String(d.name || d.expression || '');
+        const ms = Number(d.ms || 0);
+        cmd('expression', { name, ms })
+          .then((r) => send(200, { ok: true, name, applied: !!r }))
+          .catch((e) => send(500, { ok: false, error: String(e) }));
+      });
+    }
+    if (url === '/motion' && req.method === 'POST') {
+      return body((d) => {
+        const group = String(d.group || d.name || '');
+        const no = Number(d.no || 0);
+        cmd('motion', { group, no })
+          .then((r) => send(200, { ok: true, group, applied: !!r }))
+         .catch((e) => send(500, { ok: false, error: String(e) }));
+      });
+    }
+    if (url === '/lists') {
+      return cmd('lists')
+        .then((r) => send(200, { ok: true, lists: r }))
+        .catch((e) => send(500, { ok: false, error: String(e) }));
+    }
+    // 只显示气泡（不说话）
+    if (url === '/bubble' && req.method === 'POST') {
+      return body((d) => {
+        const text = String(d.text || '');
+        const dur = Number(d.seconds || 0);
+        cmd('bubble', { text, seconds: dur })
+         .then((r) => send(200, { ok: true, shown: !!r }))
+         .catch((e) => send(500, { ok: false, error: String(e) }));
+      });
+    }
+    // 交互开关：true = 窗口接收鼠标（可拖动/点击她），false = 点击穿透
+    if (url === '/interactive' && req.method === 'POST') {
+      return body((d) => {
+        const on = !!(d.on != null ? d.on : d.value);
+        setInteractive(on);   // 统一入口：账目、托盘菜单、60 秒自动恢复都走这里
+        send(200, { ok: true, interactive });
+      });
+    }
+    if (url === '/clear' && req.method === 'POST') {
+      return cmd('clear')
+        .then(() => send(200, { ok: true }))
+        .catch((e) => send(500, { ok: false, error: String(e) }));
+    }
+    if (url === '/reload' && req.method === 'POST') {
+      win.reload();
+      return send(200, { ok: true });
+    }
+    return send(404, { ok: false, error: 'unknown endpoint' });
+  }).listen(API_PORT, '127.0.0.1', () => log('api on', API_PORT));
+}
+
+// ── 启动 ──────────────────────────────────────────────────
+app.commandLine.appendSwitch('enable-transparent-visuals');
+app.commandLine.appendSwitch('ignore-gpu-blocklist');
+app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion');
+
+log('=== pet shell start pid=' + process.pid + ' model=' + MODEL);
+
+app.whenReady().then(() => {
+  allowMediaPermissions();
+  initGeometry();   // 窗口几何唯一真相，必须在 createWindow 之前建好
+  try {
+    startStaticServer();
+    startApiServer();
+    setupIpc();
+    createWindow();
+    setupTray();
+    applyInteractive();
+    startHitTestLoop();
+    startGeometryWatchdog();
+    try { settingsApply.apply(win, settingsStore.getSettings(), log, { setRoam: (on) => { try { geo.setRoam(on); } catch (e) {} } }); } catch (e) {}
+
+    // 全局热键：切换「点击穿透 / 可交互」。桌宠被堵住又不想开托盘时按这个。
+    try {
+      const { globalShortcut } = require('electron');
+      const ok = globalShortcut.register('Control+Alt+P', () => setInteractive(!interactive));
+  // 缩放快捷键：Ctrl+Alt+= 放大 / Ctrl+Alt+- 缩小 / Ctrl+Alt+0 复位
+  const scaleStep = (k) => {
+    const g = geo.get(); applySize(g.w * k, g.h * k);
+  };
+  globalShortcut.register('Control+Alt+=', () => scaleStep(1.1));
+  globalShortcut.register('Control+Alt+-', () => scaleStep(1 / 1.1));
+  globalShortcut.register('Control+Alt+0', () => applySize(520, 760));
+  globalShortcut.register('Control+Alt+Up', () => scaleStep(1.1));
+  globalShortcut.register('Control+Alt+Down', () => scaleStep(1 / 1.1));
+      log('hotkey Ctrl+Alt+P registered =', ok);
+    } catch (e) {
+      log('hotkey failed', String(e));
+    }
+  } catch (e) {
+    log('startup failed', e && e.stack ? e.stack : String(e));
+  }
+});
+
+app.on('will-quit', () => {
+  try {
+    const { globalShortcut } = require('electron');
+    globalShortcut.unregisterAll();
+  } catch (e) {}
+});
+
+app.on('window-all-closed', () => app.quit());

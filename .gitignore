@@ -1,0 +1,36 @@
+# ── 依赖与构建产物（不进仓库） ─────────────────────────────
+node_modules/
+renderer/node_modules/
+renderer/dist/
+brain/.venv/
+__pycache__/
+*.pyc
+tools/
+
+# ── 运行时产物 / 私有配置（绝对不能提交） ────────────────
+brain/voice_bridge.json
+brain/brain_port.txt
+app/pet-settings.json
+app/pet-window.json
+*.log
+*.mp3
+*.wav
+_config.yml
+
+# 本地截图（README 用的那张除外）
+shots/
+.attachments/
+
+# ── 编辑器 / 系统 ────────────────────────────────────────
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# 说明：
+#   · Live2D Cubism Core 与 Framework 随仓库提供，方便直接跑起来，
+#     但它们的版权属于 Live2D Inc.，使用前请阅读 THIRD-PARTY.md。
+#   · 模型「大肥鱼」随仓库提供；如果你要换成自己的模型，
+#     放到 renderer/public/Resources/<模型名>/ 即可。
+#   · 官方示例模型（Haru/Hiyori/…）没有放进来，授权原因见 THIRD-PARTY.md。

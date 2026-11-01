@@ -1,0 +1,15 @@
+# 语音与大脑（Python）
+#
+# 装法：brain\.venv\Scripts\python.exe -m pip install -r requirements.txt
+#
+# 注意：PyAudio 在 Windows 上需要 Visual C++ 运行库；
+# 装不上时先装 https://aka.ms/vs/17/release/vc_redist.x64.exe
+
+numpy>=1.24
+requests>=2.31
+pyaudio>=0.2.13
+sherpa-onnx>=1.10
+zstandard>=0.22
+psutil>=5.9
+edge-tts>=6.1
+PySide6>=6.5
