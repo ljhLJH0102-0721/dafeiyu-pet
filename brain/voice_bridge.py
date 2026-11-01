@@ -58,6 +58,11 @@ try:
 except Exception:  # pragma: no cover
     PetLLM = None
 
+# 联网查天气 / 搜索（失败只是没有联网能力，不影响聊天）
+try:
+    import pet_net as PetNet
+except Exception:  # pragma: no cover
+    PetNet = None
 # Live2D 桌宠（大肥鱼）控制接口；桌宠没开时所有调用都会安全返回 None
 try:
     import live2d_pet
@@ -1080,6 +1085,7 @@ class ApiBrain:
     def __init__(self, llm):
         self.llm = llm
         self._cfg_mtime = None
+        self._cfg = {}
 
     def warmup(self):
         return None
@@ -1093,6 +1099,7 @@ class ApiBrain:
                     self._cfg_mtime = mt
                     fresh = load_config()
                     self.llm = PetLLM(fresh.get("llm") or {})
+                    self._cfg = fresh
                     log("大脑配置已热重载：%s" % self.llm.describe())
         except Exception as exc:
             log("热重载配置失败（继续用旧的）：%s" % exc)
@@ -1407,8 +1414,22 @@ def mic_loop(asr, brain, say_it, vad, context, cfg, device_index, stop_event):
                 timeout_s = PROMPT_TIMEOUT_TASK if task_like else PROMPT_TIMEOUT
                 if task_like:
                     say_it('好，我去看看。')
-                answer = brain.ask_timed(context.compose(
-                    command_text, desktop.format_screen(screen) if screen else None), timeout=timeout_s)
+                # 联网：只有问「我本来不知道的事实」时才查（用主人这句话判断，不用整段提示词）
+                prompt_text = context.compose(
+                    command_text, desktop.format_screen(screen) if screen else None)
+                try:
+                    if PetNet is not None and PetNet.looks_like_info_need(command_text):
+                        _city = (load_config().get("weather_city") or None)
+                        facts = PetNet.research(command_text, _city)
+                        if facts:
+                            log("联网查到（%s）：%s" % (command_text[:20], facts[:80].replace("\n", " ")))
+                            prompt_text = ("【刚刚联网查到的实时资料，回答以此为准，不要编造】\n"
+                                           + facts + "\n\n" + prompt_text)
+                        else:
+                            log("联网没查到，照常回答")
+                except Exception as exc:
+                    log("联网失败（照常回答）：%s" % exc)
+                answer = brain.ask_timed(prompt_text, timeout=timeout_s)
             except Exception as exc:
                 # 大脑卡住/挂了：不要让整个对话线程跟着死，先回一句，下一句还能继续
                 log('问大脑失败：%s' % exc)
