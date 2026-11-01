@@ -1,0 +1,13 @@
+{
+  "name": "dafeiyu-desktop-pet",
+  "version": "1.0.0",
+  "description": "大肥鱼桌宠 — Live2D 桌面宠物（聊天 / 语音 / 点屏幕）",
+  "main": "main.js",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron . --model 大肥鱼 --w 520 --h 760"
+  },
+  "devDependencies": {
+    "electron": "^28.3.3"
+  }
+}

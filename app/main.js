@@ -17,7 +17,18 @@ const fs = require('fs');
 const path = require('path');
 
 const ROOT = path.resolve(__dirname, '..');
-const DIST = path.join(ROOT, 'Demo', 'dist');
+// 页面产物目录：开源仓库布局是 renderer/dist，本地开发布局是 Demo/dist
+const DIST = (() => {
+  const candidates = [
+    path.join(ROOT, 'renderer', 'dist'),
+    path.join(ROOT, 'Demo', 'dist'),
+    path.join(__dirname, '..', 'renderer', 'dist'),
+  ];
+  for (const c of candidates) {
+    try { if (fs.existsSync(path.join(c, 'index.html'))) return c; } catch (e) {}
+  }
+  return candidates[0];
+})();
 // 语音文件目录（pet_voice.py 用 edge-tts 生成 mp3，这里发给页面播放）
 const AUDIO_DIR =
   process.env.PET_AUDIO_DIR ||

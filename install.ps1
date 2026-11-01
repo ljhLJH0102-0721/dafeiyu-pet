@@ -84,19 +84,17 @@ $resDir = Join-Path $renderer 'public\Resources'
 
 $missing = 0
 if (-not (Test-Path $core)) {
-  Write-Host '  ✗ 缺 Cubism Core' -ForegroundColor Yellow
+  Write-Host '  ✗ 缺 Cubism Core（仓库里应该自带；被 .gitignore 挡了？）' -ForegroundColor Yellow
   Say '    放到: renderer\public\Core\live2dcubismcore.js'
   Say '    来源: https://www.live2d.com/sdk/cubism/sdk-download/'
   $missing++
-} else { Ok 'Cubism Core 就位' }
+} else { Ok 'Cubism Core 就位（随仓库提供）' }
 
-$framework = Join-Path (Split-Path $root -Parent) 'Framework\src'
+$framework = Join-Path $root 'Framework\src'
 if (-not (Test-Path $framework)) {
-  Write-Host '  ✗ 缺 Cubism Framework 源码（构建需要）' -ForegroundColor Yellow
-  Say '    放到: ' + $framework
-  Say '    来源: 同一个 Cubism SDK 压缩包里的 Framework\src'
+  Write-Host '  ✗ 缺 Cubism Framework 源码（仓库里应该自带）' -ForegroundColor Yellow
   $missing++
-} else { Ok 'Framework 就位' }
+} else { Ok 'Cubism Framework 就位（随仓库提供）' }
 
 $models = @()
 if (Test-Path $resDir) {
@@ -105,7 +103,6 @@ if (Test-Path $resDir) {
 if ($models.Count -eq 0) {
   Write-Host '  ✗ 还没有模型' -ForegroundColor Yellow
   Say '    放到: renderer\public\Resources\<模型名>\'
-  Say '    里面应该有 <模型名>.model3.json、.moc3、贴图、motions/、expressions/'
   $missing++
 } else {
   Ok ('可用模型: ' + ($models -join ', '))

@@ -72,12 +72,18 @@ pwsh -File install.ps1
 ## 启动
 
 ```powershell
-# 只启动桌宠窗口（聊天 + 点击）
-node app/main.js --model 你的模型名 --w 520 --h 760
+# 1) 装一次 electron（约 90MB，只装一次）
+cd app
+npm install
+cd ..
 
-# 再启动语音（另开一个窗口）
-cd brain
-.\.venv\Scripts\python.exe voice_bridge.py
+# 2) 启动桌宠窗口（聊天 + 点击）
+cd app
+npx electron . --model 大肥鱼 --w 520 --h 760
+cd ..
+
+# 3) 再启动语音（另开一个 PowerShell 窗口）
+brain\.venv\Scripts\python.exe brain\voice_bridge.py
 ```
 
 想开机自启，可以把上面两条包成快捷方式放进「启动」文件夹，或用 `schtasks` 建计划任务。
