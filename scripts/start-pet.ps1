@@ -134,13 +134,22 @@ if ($NoVoice) {
   } elseif (-not (Test-Path (Join-Path $brainDir 'voice_bridge.json'))) {
     Warn '缺 brain\voice_bridge.json（没有 API 配置），跳过语音'
   } else {
-    Info '启动语音桥…'
-    Start-Process -FilePath $py `
-      -ArgumentList @((Join-Path $brainDir 'voice_bridge.py')) `
-      -WorkingDirectory $brainDir -WindowStyle Hidden | Out-Null
-    Start-Sleep -Seconds 3
+    # 语音桥优先用计划任务启动：Windows 下只有「计划任务动作直接是 python.exe」
+    # 才拿得到输入注入（模拟鼠标/键盘）的权限；直接起 pythonw 会被拒绝（err=0）。
+    $taskName = 'DSH-AI-Voice'
+    $hasTask = $false
+    try { $hasTask = [bool](Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue) } catch {}
+    if ($hasTask) {
+      Info '启动语音桥（走计划任务，保留输入注入权限）…'
+      & schtasks.exe /Run /TN $taskName 2>&1 | Out-Null
+    } else {
+      Info '启动语音桥（没有计划任务，直接启动；注入权限可能受限）…'
+      Start-Process -FilePath $py -ArgumentList @((Join-Path $brainDir 'voice_bridge.py')) -WorkingDirectory $brainDir -WindowStyle Hidden | Out-Null
+    }
+    Start-Sleep -Seconds 4
     if (Test-BridgeRunning) { Ok '语音桥起来了' } else { Warn '语音桥没起来，看看 brain\voice_bridge.log' }
   }
+}
 }
 
 Write-Host ''

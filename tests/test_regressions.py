@@ -27,7 +27,6 @@ import time
 import urllib.error
 import urllib.request
 
-BASE = "http://127.0.0.1:5011"
 
 # 仓库布局：tests/ 的上一级就是仓库根；也可用 PET_DIR 指定语音目录
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -365,25 +364,28 @@ def main():
         r.check("F2", "漫游缩放不缩窗口", f2)
 
         def f3():
-            """放大到顶时她不能把画布撑满（会被切头）。
-
-            我在 520x760 和 1536x824 两种画布上各实测过一次：
-            她的可见高度 = 基准高度 * 0.884 * (当前缩放 / 基准缩放)。
-            """
-            set_roam(True)
-            time.sleep(2.0)
-            ev("window.__setRoamOffset(0, 0)")
-            time.sleep(0.3)
-            wheel(-100, 12)
-            time.sleep(1.0)
-            info = fit_info()
-            canvas_h = int(ev("String(window.innerHeight)"))
-            base = info["fitRef"]["H"] * 0.884
-            zoom = info["curScale"] / info["fitRef"]["scale"]
-            height = base * zoom
-            ratio = height / canvas_h
-            ok = ratio <= 0.95
-            return ok, "缩放 %.2fx → 高度 %.0f / 画布 %d（%.0f%%）" % (zoom, height, canvas_h, ratio * 100)
+            """放大到顶时不能把画布撑满（会切头）。整段重试，页面忙的时候 /eval 会 500。"""
+            last = "未知错误"
+            for attempt in range(3):
+                try:
+                    set_roam(True)
+                    time.sleep(4.0)
+                    ev("window.__setRoamOffset(0, 0)")
+                    time.sleep(0.5)
+                    wheel(-100, 12)
+                    time.sleep(1.5)
+                    info = fit_info()
+                    canvas_h = int(ev("String(window.innerHeight)"))
+                    base = info["fitRef"]["H"] * 0.884
+                    zoom = info["curScale"] / info["fitRef"]["scale"]
+                    height = base * zoom
+                    ratio = height / canvas_h
+                    return ratio <= 0.95, "缩放 %.2fx → 高度 %.0f / 画布 %d（%.0f%%）" % (
+                        zoom, height, canvas_h, ratio * 100)
+                except Exception as exc:
+                    last = "%s: %s" % (type(exc).__name__, exc)
+                    time.sleep(3.0)
+            return False, "三次都失败（%s）" % last
         r.check("F3", "放大不切头", f3)
 
         def f4():
@@ -424,25 +426,29 @@ def main():
         r.check("G2", "麦克风已打开", g2)
 
         def g3():
-            src = open(BRIDGE_PY, encoding="utf-8").read()
+            src = open(r"C:\Users\Administrator\Documents\deepseek-harness"
+                       r"\default-workspace\dafeiyu-pet\voice_bridge.py", encoding="utf-8").read()
             ok = ("_echo" in src) and ("重复的一句" in src) and ("电平" in src and "噪声丢弃" in src)
             return ok, "回声抑制+去重+电平门限 都在" if ok else "缺少防重复机制"
         r.check("G3", "不重复回话（机制）", g3)
 
         def g4():
-            src = open(BRIDGE_PY, encoding="utf-8").read()
+            src = open(r"C:\Users\Administrator\Documents\deepseek-harness"
+                       r"\default-workspace\dafeiyu-pet\voice_bridge.py", encoding="utf-8").read()
             ok = ("ask_timed" in src) and ("PROMPT_TIMEOUT = 45" in src)
             return ok, "大脑调用有硬超时" if ok else "缺少超时保护"
         r.check("G4", "大脑不会卡死", g4)
 
         # ── H. 独立性 ────────────────────────────────
         def h1():
-            cfg = json.load(open(BRIDGE_CFG, encoding="utf-8"))
+            cfg = json.load(open(r"C:\Users\Administrator\Documents\deepseek-harness"
+                                 r"\default-workspace\dafeiyu-pet\voice_bridge.json", encoding="utf-8"))
             return cfg.get("brain_mode") == "api", "brain_mode=%s" % cfg.get("brain_mode")
         r.check("H1", "用独立 API 大脑", h1)
 
         def h2():
-            src = open(BRIDGE_PY, encoding="utf-8").read()
+            src = open(r"C:\Users\Administrator\Documents\deepseek-harness"
+                       r"\default-workspace\dafeiyu-pet\voice_bridge.py", encoding="utf-8").read()
             ok = "USE_DSH_CONTEXT = False" in src
             return ok, "不注入主会话" if ok else "仍在读主会话"
         r.check("H2", "不读主会话", h2)

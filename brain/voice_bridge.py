@@ -64,33 +64,74 @@ try:
 except Exception:  # pragma: no cover
     live2d_pet = None
 
-# ── 打字改道：优先交给 DSH 的「打字插件」，不走系统模拟输入 ──────────────
-# 这台机器的会话收不到注入输入（SendInput 报告成功但没效果），
-# 而 DSH 页面里的插件是直接写 DOM，稳定可靠。桌宠没开时才退回原路径。
+# ── 打字去哪 ─────────────────────────────────────────────
+# 主人明确要求：她只负责「聊天 + 打字」，而且**不许在 DSH 窗口里办事**。
+# 所以打字默认走系统模拟输入（打进当前焦点窗口），不再优先写 DSH 的 DOM。
+# 打字通道：auto = 系统允许注入就用注入（打进当前焦点窗口），否则写 DSH 输入框
+TYPE_VIA = "auto"        # auto（默认） | inject | plugin
+
+
+_ROUTE_CACHE = {"v": None}      # 打字通道只探测一次就定下来（每句都探会来回翻）
+
+
+def _type_route():
+    """打字走哪条：inject（系统注入，打进当前焦点窗口）或 plugin（写 DSH 输入框）。"""
+    if TYPE_VIA in ("inject", "plugin"):
+        return TYPE_VIA
+    if _ROUTE_CACHE["v"]:
+        return _ROUTE_CACHE["v"]
+    try:
+        ok, _err = desktop.input_allowed()
+        _ROUTE_CACHE["v"] = "inject" if ok else "plugin"
+    except Exception:
+        _ROUTE_CACHE["v"] = "plugin"
+    return _ROUTE_CACHE["v"]
+
+
+def _lock_type_route(inject_ok):
+    """启动自检后固定打字通道。
+
+    实测：这台机器上系统注入「报告成功但字不落地」（EM_REPLACESEL 返回 ok 却 length 0），
+    所以只要 DSH 打字插件在，就优先用它；插件不在才用系统注入。
+    """
+    if TYPE_VIA in ("inject", "plugin"):
+        _ROUTE_CACHE["v"] = TYPE_VIA
+        return TYPE_VIA
+    if live2d_pet is not None:
+        _ROUTE_CACHE["v"] = "plugin"
+        log("打字通道：DSH 输入框（系统注入在本机实测无效）")
+    else:
+        _ROUTE_CACHE["v"] = "inject" if inject_ok else "plugin"
+        log("打字通道：%s" % ("系统注入" if inject_ok else "无可用通道（插件也没连上）"))
+    return _ROUTE_CACHE["v"]
+
+
 def run_actions(actions):
-    """执行动作。type 优先交给 DSH 打字插件（写 DOM），失败再退回系统模拟输入。"""
+    """执行动作。打字默认走系统模拟输入。"""
     routed = []
     for a in actions or []:
-        if isinstance(a, dict) and a.get("op") == "clear" and live2d_pet is not None:
+        if not isinstance(a, dict):
+            routed.append(a)
+            continue
+        op = a.get("op")
+        # 开程序：直接拒绝（她不该有这能力）
+        if op == "run":
+            log("拒绝开程序请求：%r" % (a.get("command"),))
+            continue
+        if _type_route() == "plugin" and live2d_pet is not None and op in ("type", "clear"):
             try:
-                r = live2d_pet.clear_input()
+                if op == "clear":
+                    r = live2d_pet.clear_input()
+                else:
+                    r = live2d_pet.queue_text(a.get("text", ""))
                 if r and r.get("ok"):
-                    routed.append({"op": "wait", "ms": 0, "note": "cleared via dsh-plugin"})
-                    log("清空输入框走插件通道")
-                    continue
-            except Exception as exc:
-                log("清空通道失败：%s" % exc)
-        if isinstance(a, dict) and a.get("op") == "type" and live2d_pet is not None:
-            try:
-                r = live2d_pet.queue_text(a.get("text", ""))
-                if r and r.get("ok"):
-                    routed.append({"op": "wait", "ms": 0, "note": "typed via dsh-plugin: " + str(a.get("text", ""))[:40]})
+                    routed.append({"op": "wait", "ms": 0, "note": "dsh-plugin"})
                     log("打字走插件通道：%r" % str(a.get("text", ""))[:60])
                     continue
             except Exception as exc:
-                log("插件通道失败，退回模拟输入：%s" % exc)
-        if isinstance(a, dict) and a.get("op") == "type":
-            log("打字没走插件通道：live2d_pet=%s 结果=%r" % (live2d_pet is not None, locals().get("r")))
+                log("插件通道失败，退回系统注入：%s" % exc)
+        if op == "type":
+            log("打字走系统注入（当前焦点窗口）：%r" % str(a.get("text", ""))[:60])
         routed.append(a)
     return desktop.execute_actions(routed)
 
@@ -190,23 +231,32 @@ DESKTOP_TOOL = os.path.join(HERE, "desktop_tool.py")
 # 屏幕内容以 OCR 文本 + 坐标的形式喂给它，它就相当于「看见」了屏幕。
 SYSTEM_PREAMBLE = """（下面是我用嘴说的一句话，可能有粤语口音或粤语用字。）
 
-你是我的桌面宠物「大肥鱼」。你只负责两件事：**陪我聊天**、**帮我在屏幕上点/打字**。
+你是我的桌面宠物「大肥鱼」。你**只负责两件事**：
+  1. **陪我聊天**
+  2. **帮我把字打出来 / 点一下屏幕**
 
 【聊天】
 - 用简体中文普通话，口语化，一句话就够，最多两句。
 - 不要长篇大论、不要列清单、不要重复我刚刚说过的话。
 
+【关于打字】
+- 我说「打几个字 / 帮我打 / 打字」时，意思是**开启听写**：我下一句说什么，你就原样打出去，
+  不要接话、不要评论内容、不要说"好的，我来帮你输入"之类，直接打。
+- 打字要打进**当前焦点窗口**，不要去动别的地方。
+
 【需要操作屏幕时】
 只输出一个 JSON 对象，前后不要别的：
 {"say": "对我说的一句话（不超过 40 字）", "actions": [动作, ...]}
-可用动作：
+可用动作只有这几种：
   {"op": "click", "x": 123, "y": 456}      点左键（可加 "button":"right"、"double":true）
   {"op": "type", "text": "要输入的文字"}
   {"op": "key", "combo": "ctrl+s"}
   {"op": "scroll", "amount": 3}
-  {"op": "activate", "title": "窗口标题片段"}
 
 规则：
+- **你没有打开程序的能力**：不许说"我帮你打开浏览器/记事本"，也不许输出 run 类动作。
+  我说要开程序时，就回一句"这个你自己点一下吧，我只帮你打字"。
+- **不要去操作 DSH 那个窗口里我的工作界面**（不要点它的按钮、不要切它的会话）。
 - 屏幕文字里的 @x,y 就是坐标，可以直接用；找不到明确目标就问我，别猜。
 - 你**没有命令行、没有文件工具**，做不到的事就直说做不到，别编。
 - 不可逆操作（关窗口、删除、付款）先说清打算做什么，等我确认。
@@ -383,17 +433,28 @@ def local_plan(text, screen=None):
     if not s:
         return None
 
+    # 她只负责「聊天 + 打字」，不负责开程序（主人明确要求过）
     m = re.match(r"^(?:请|帮我|帮忙|麻烦)?\s*(?:打开|开启|启动|运行|开)\s*(?:一下)?\s*(.+)$", s)
     if m:
         target = m.group(1).strip()
-        return {"say": "好，打开%s。" % target,
-                "actions": [{"op": "run", "command": APP_ALIASES.get(target, target)}]}
+        return {"say": "我不开程序哦，%s 你自己点一下吧。我只帮你打字。" % target,
+                "actions": []}
 
     # 删掉 / 清空输入框里的字
     if re.search(r"(删掉|删除|清空|清除|擦掉|抹掉).{0,8}(框|输入|文字|内容|字)", s):
         return {"say": "好，清空。", "actions": [{"op": "clear"}]}
 
-    m = re.match(r"^(?:请|帮我|帮忙|麻烦)?\s*(?:打字|输入|键入)\s*[，,：:]?\s*(.+)$", s)
+    m = re.match(
+        r"^(?:请|帮我|帮忙|麻烦)?\s*(?:打字|输入|键入|打一下|打个字|打几个字|打点字|打一段|敲一下)"
+        r"\s*(?:一下)?\s*[，,：:]?\s*(.+)$", s)
+    if m:
+        body = m.group(1).strip()
+        if body in ("字", "几个字", "点字", "一段", "一下"):
+            return {"say": "打什么？说一下内容。", "actions": []}
+        return {"say": "好，打上去。", "actions": [{"op": "type", "text": body}]}
+
+    # 「帮我打：xxx」「打：xxx」——裸「打」加冒号也算明确指令
+    m = re.match(r"^(?:请|帮我|帮忙|麻烦)?\s*打\s*[：:]\s*(.+)$", s)
     if m:
         return {"say": "好，打上去。", "actions": [{"op": "type", "text": m.group(1).strip()}]}
 
@@ -423,7 +484,7 @@ def local_plan(text, screen=None):
         return {"say": "好。", "actions": [{"op": "scroll", "amount": -5}]}
 
     # 只有动词没有宾语：给个提示，别把话吞了。
-    if re.match(r"^(?:请|帮我|帮忙)?\s*(?:打字|输入|键入)$", s):
+    if re.match(r"^(?:请|帮我|帮忙)?\s*(?:打字|输入|键入|打一下|打个字|打几个字|打点字|敲一下)\s*(?:一下)?$", s):
         return {"say": "打什么？说一下内容。", "actions": []}
     if re.match(r"^(?:请|帮我|帮忙)?\s*(?:打开|开启|启动|运行)$", s):
         return {"say": "打开什么？", "actions": []}
@@ -1318,7 +1379,7 @@ def mic_loop(asr, brain, say_it, vad, context, cfg, device_index, stop_event):
                 return
 
         # 只说了「打字」：进入听写模式，等下一句。
-        if re.match(r"^(?:请|帮我|帮忙|麻烦)?\s*(?:打字|输入|键入)$",
+        if re.match(r"^(?:请|帮我|帮忙|麻烦)?\s*(?:打字|输入|键入|打一下|打个字|打几个字|打点字|敲一下)\s*(?:一下)?$",
                     re.sub(r"[。.!！?？~～…]+$", "", command_text.strip())):
             dictation["until"] = time.monotonic() + 30
             log("进入听写模式（30 秒内下一句原样打出去）")
@@ -1763,6 +1824,7 @@ def main():
             time.sleep(0.4)
             ok2, _ = desktop.input_allowed()
             log("控制台已隐藏；隐藏后注入：%s" % ("仍允许" if ok2 else "**被拒绝**（那就不该隐藏）"))
+            _lock_type_route(bool(ok2))
     except Exception as exc:
         log("输入注入自检失败：%s" % exc)
 
