@@ -104,6 +104,31 @@ const fit = createModelFit({
   getCacheKey: (w: number, h: number) => 'pet.fit|' + location.search + '|' + w + 'x' + h,
 });
 
+  // 她真实占据的像素范围：网格打点（readPixels 判定），兜底用粗网格控制耗时
+  (window as any).__petBounds = () => {
+    const W = window.innerWidth;
+    const H = window.innerHeight;
+    const step = W > 900 ? 14 : 6;
+    let minX = 1e9, minY = 1e9, maxX = -1e9, maxY = -1e9, n = 0;
+    for (let y = 0; y < H; y += step) {
+      for (let x = 0; x < W; x += step) {
+        let hit = false;
+        try { hit = isOnCharacter(x, y); } catch (e) { hit = false; }
+        if (!hit) continue;
+        n++;
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+    }
+    if (n === 0) return { hits: 0, height: 0, width: 0, canvasH: H, canvasW: W };
+    return {
+      hits: n, top: minY, bottom: maxY, left: minX, right: maxX,
+      height: maxY - minY, width: maxX - minX, canvasH: H, canvasW: W,
+    };
+  };
+
 // 调试：查看当前适配基准和实际矩阵（矩阵读取统一走 fit，不直接摸 _modelMatrix）
 (window as any).__fitInfo = () => {
   const cur = fit.getScale();
@@ -147,6 +172,15 @@ export function setupInteraction(): void {
   } catch (e) {}
 
   function saveRoamOffset(): void {
+
+  /** 归位到画布中央（漫游复位 / 测试用） */
+  (window as any).__setRoamOffset = (x: number, y: number) => {
+    roamOffset = { x: Number(x) || 0, y: Number(y) || 0 };
+    roamDrag = null;
+    applyRoamOffset();
+    saveRoamOffset();
+    return roamOffset;
+  };
     try { window.localStorage.setItem(ROAM_KEY, JSON.stringify(roamOffset)); } catch (e) {}
   }
 

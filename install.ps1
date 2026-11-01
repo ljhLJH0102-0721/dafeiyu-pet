@@ -1,4 +1,4 @@
-# -*- mode: powershell -*-
+﻿# -*- mode: powershell -*-
 <#
   install.ps1 —— 一键安装大肥鱼桌宠
 
@@ -149,3 +149,8 @@ Write-Host '  再启动语音（另开一个窗口）：' -ForegroundColor Gray
 Write-Host '    brain\.venv\Scripts\python.exe brain\voice_bridge.py' -ForegroundColor White
 Write-Host ''
 Write-Host '  打开设置：右键点她 →「设置…」' -ForegroundColor Gray
+Write-Host ''
+Write-Host '  想要桌面图标 / 开机自启：' -ForegroundColor Gray
+Write-Host '    pwsh -File scripts\autostart.ps1 -Install' -ForegroundColor White
+Write-Host ''
+Write-Host '  以后直接双击 启动桌宠.cmd 就行。' -ForegroundColor Gray

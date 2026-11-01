@@ -18,7 +18,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 const require = createRequire(import.meta.url);
-const { createWindowState } = require('../app/shell/windowState.js');
+const { createWindowState } = require('../pet-shell/shell/windowState.js');
 
 /** 假 screen：1920x1080，125% 缩放 */
 function fakeScreen(dpr = 1.25) {

@@ -1,4 +1,4 @@
-# verify.ps1 — 一键验收（P0 起的所有门禁）
+﻿# verify.ps1 — 一键验收（P0 起的所有门禁）
 #
 # 用法：
 #   pwsh -File scripts\verify.ps1            # 全部

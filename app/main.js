@@ -8,6 +8,18 @@
 // 6) 本地控制接口（127.0.0.1:5011）：口型 / 参数 / 反应
 
 const { app, BrowserWindow, screen, Tray, Menu, ipcMain, nativeImage, session } = require('electron');
+
+// 单实例：开机时「启动文件夹快捷方式」和「计划任务」可能同时拉起，第二份直接退出，
+// 否则两个进程会抢 5011 端口，出现一个空白窗口。
+if (!app.requestSingleInstanceLock()) {
+  try { console.log("[pet] 已有一个实例在跑，本实例退出"); } catch (e) {}
+  app.exit(0);
+}
+app.on('second-instance', () => {
+  try {
+    if (win && !win.isDestroyed()) { win.show(); win.focus(); }
+  } catch (e) {}
+});
 const { createWindowState } = require('./shell/windowState');
 const pageCommand = require('./shell/pageCommand');
 const settingsStore = require('./shell/settingsStore');
@@ -17,18 +29,7 @@ const fs = require('fs');
 const path = require('path');
 
 const ROOT = path.resolve(__dirname, '..');
-// 页面产物目录：开源仓库布局是 renderer/dist，本地开发布局是 Demo/dist
-const DIST = (() => {
-  const candidates = [
-    path.join(ROOT, 'renderer', 'dist'),
-    path.join(ROOT, 'Demo', 'dist'),
-    path.join(__dirname, '..', 'renderer', 'dist'),
-  ];
-  for (const c of candidates) {
-    try { if (fs.existsSync(path.join(c, 'index.html'))) return c; } catch (e) {}
-  }
-  return candidates[0];
-})();
+const DIST = path.join(ROOT, 'Demo', 'dist');
 // 语音文件目录（pet_voice.py 用 edge-tts 生成 mp3，这里发给页面播放）
 const AUDIO_DIR =
   process.env.PET_AUDIO_DIR ||
@@ -109,7 +110,7 @@ const MIME = {
 };
 
 function startStaticServer() {
-  http.createServer((req, res) => {
+  const staticServer = http.createServer((req, res) => {
     try {
       let rel = decodeURIComponent((req.url || '/').split('?')[0]);
       if (rel === '/' || rel === '') rel = '/index.html';
@@ -144,7 +145,12 @@ function startStaticServer() {
     } catch (e) {
       res.writeHead(500); res.end('error');
     }
-  }).listen(STATIC_PORT, '127.0.0.1', () => log('static on', STATIC_PORT));
+  });
+  staticServer.listen(STATIC_PORT, '127.0.0.1', () => log('static on', STATIC_PORT));
+
+  staticServer.on('error', (e) => {
+    log('[static] 监听失败', e.code, '（可能另一份在跑）');
+  });
 }
 
 // ── 窗口 ──────────────────────────────────────────────────
@@ -673,7 +679,7 @@ function jsSet(params) {
 }
 
 function startApiServer() {
-  http.createServer((req, res) => {
+  const apiServer = http.createServer((req, res) => {
     const url = (req.url || '/').split('?')[0];
     // DSH 的打字插件在 web 页面里跨源调用这个 API，必须放行 CORS
     res.setHeader('Access-Control-Allow-Origin', '*');
@@ -693,6 +699,13 @@ function startApiServer() {
     // 设置：GET 读当前配置，POST 打开设置窗口
     // 应用设置（JSON 补丁）：界面和脚本都走这里
     // 关闭设置窗口（脚本/测试用）
+    // 脚本化退出（stop-pet.ps1 用）
+    if (url === '/quit' && req.method === 'POST') {
+      send(200, { ok: true, quitting: true });
+      setTimeout(() => { try { app.quit(); } catch (e) {} }, 150);
+      return;
+    }
+
     if (url === '/settings/close' && req.method === 'POST') {
       try { if (settingsWin && !settingsWin.isDestroyed()) settingsWin.close(); } catch (e) {}
       return send(200, { ok: true });
@@ -906,7 +919,9 @@ function startApiServer() {
       return send(200, { ok: true });
     }
     return send(404, { ok: false, error: 'unknown endpoint' });
-  }).listen(API_PORT, '127.0.0.1', () => log('api on', API_PORT));
+  });
+  apiServer.listen(API_PORT, '127.0.0.1', () => log('api on', API_PORT));
+  apiServer.on('error', (e) => log('[api] 监听失败', e.code, '（可能另一份在跑）'));
 }
 
 // ── 启动 ──────────────────────────────────────────────────

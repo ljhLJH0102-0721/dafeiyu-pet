@@ -16,9 +16,9 @@ import { createRequire } from 'node:module';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
-const ts = require(path.join(__dirname, '..', 'renderer', 'node_modules', 'typescript', 'lib', 'typescript.js'));
+const ts = require(path.join(__dirname, '..', 'Demo', 'node_modules', 'typescript', 'lib', 'typescript.js'));
 
-const SRC = path.join(__dirname, '..', 'renderer', 'src', 'pet', 'pose.ts');
+const SRC = path.join(__dirname, '..', 'Demo', 'src', 'pet', 'pose.ts');
 
 async function loadPose() {
   const src = fs.readFileSync(SRC, 'utf8');

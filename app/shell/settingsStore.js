@@ -27,10 +27,6 @@ function resolvePetDir() {
   const candidates = [];
   if (process.env.PET_PY_DIR) candidates.push(process.env.PET_PY_DIR);
   const shellParent = path.dirname(SHELL_DIR);
-  // 开源仓库布局：app/ 与 brain/ 同级
-  candidates.push(path.join(shellParent, 'brain'));
-  candidates.push(path.join(shellParent, '..', 'brain'));
-  // 老布局（本地开发时用的）
   candidates.push(path.join(shellParent, 'dafeiyu-pet'));
   candidates.push(path.join(shellParent, '..', 'dafeiyu-pet'));
   if (process.env.USERPROFILE) {

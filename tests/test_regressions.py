@@ -29,7 +29,7 @@ import urllib.request
 
 BASE = "http://127.0.0.1:5011"
 
-# 仓库布局：tests/ 的上一级就是仓库根
+# 仓库布局：tests/ 的上一级就是仓库根；也可用 PET_DIR 指定语音目录
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 APP_DIR = os.path.join(ROOT, "app")
 BRAIN_DIR = os.environ.get("PET_DIR") or os.path.join(ROOT, "brain")
@@ -365,11 +365,25 @@ def main():
         r.check("F2", "漫游缩放不缩窗口", f2)
 
         def f3():
-            # 放大后头顶不能被切：她的高度不能超过画布
-            cur = fit_info()["curScale"]
+            """放大到顶时她不能把画布撑满（会被切头）。
+
+            我在 520x760 和 1536x824 两种画布上各实测过一次：
+            她的可见高度 = 基准高度 * 0.884 * (当前缩放 / 基准缩放)。
+            """
+            set_roam(True)
+            time.sleep(2.0)
+            ev("window.__setRoamOffset(0, 0)")
+            time.sleep(0.3)
+            wheel(-100, 12)
+            time.sleep(1.0)
+            info = fit_info()
             canvas_h = int(ev("String(window.innerHeight)"))
-            model_h = 760 * 0.82 * (cur / fit_info()["fitRef"]["scale"])
-            return model_h <= canvas_h * 0.95, "她的高度 %.0f / 画布 %d" % (model_h, canvas_h)
+            base = info["fitRef"]["H"] * 0.884
+            zoom = info["curScale"] / info["fitRef"]["scale"]
+            height = base * zoom
+            ratio = height / canvas_h
+            ok = ratio <= 0.95
+            return ok, "缩放 %.2fx → 高度 %.0f / 画布 %d（%.0f%%）" % (zoom, height, canvas_h, ratio * 100)
         r.check("F3", "放大不切头", f3)
 
         def f4():

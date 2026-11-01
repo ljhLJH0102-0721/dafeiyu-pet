@@ -69,24 +69,62 @@ pwsh -File install.ps1
 
 ---
 
-## 启动
+## 启动（三种方式）
 
-```powershell
-# 1) 装一次 electron（约 90MB，只装一次）
-cd app
-npm install
-cd ..
+### 1. 双击（最简单）
 
-# 2) 启动桌宠窗口（聊天 + 点击）
-cd app
-npx electron . --model 大肥鱼 --w 520 --h 760
-cd ..
+装完 `install.ps1` 后会生成：
 
-# 3) 再启动语音（另开一个 PowerShell 窗口）
-brain\.venv\Scripts\python.exe brain\voice_bridge.py
+```
+启动桌宠.cmd      ← 双击：启动窗口 + 语音
+停止桌宠.cmd      ← 双击：全部关闭
 ```
 
-想开机自启，可以把上面两条包成快捷方式放进「启动」文件夹，或用 `schtasks` 建计划任务。
+`install.ps1` 也会问你要不要创建**桌面图标**和**开始菜单项**。
+
+### 2. 桌面图标 / 开始菜单
+
+```powershell
+# 创建桌面图标 + 开始菜单 + 开机自启
+pwsh -File scripts\autostart.ps1 -Install
+
+# 只看当前状态
+pwsh -File scripts\autostart.ps1
+
+# 全部卸载（含取消开机自启）
+pwsh -File scripts\autostart.ps1 -Remove
+```
+
+装完后：
+
+* **桌面**：`大肥鱼桌宠` 图标，双击即开
+* **开始菜单**：搜索「大肥鱼」就能找到
+* **开机自启**：登录后自动出现在桌面（在「启动」文件夹里能看到）
+
+> 不想开机自启、只要图标：`pwsh -File scripts\autostart.ps1 -Install -NoAuto`
+
+### 3. 命令行
+
+```powershell
+# 启动（窗口 + 语音）
+pwsh -File scripts\start-pet.ps1
+
+# 只要窗口，不要语音
+pwsh -File scripts\start-pet.ps1 -NoVoice
+
+# 指定模型
+pwsh -File scripts\start-pet.ps1 -Model 大肥鱼
+
+# 关闭
+pwsh -File scripts\stop-pet.ps1
+```
+
+### 说明
+
+* **不会重复启动**：已经有一份在跑时，再点图标会说「已经在跑了」，不会开出第二个窗口
+  （窗口本身有单实例锁，语音桥也有互斥锁）
+* **退出**：右键托盘图标 →「退出」，或双击 `停止桌宠.cmd`
+* **第一次要先装依赖**：见上面「安装」一节
 
 ---
 

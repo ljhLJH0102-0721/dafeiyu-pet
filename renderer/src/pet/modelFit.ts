@@ -257,7 +257,7 @@ export function createModelFit(deps: ModelFitDeps): ModelFit {
       const rect = deps.getCanvas().getBoundingClientRect();
       const canvasH = Math.max(80, rect.height);
       const baseH = (fitRef ? fitRef.H : (deps.maxLogicalHeight || canvasH)) * 0.82;
-      return Math.max(1, Math.min(3.0, (canvasH * 0.88) / Math.max(1, baseH)));
+      return Math.max(1, Math.min(3.0, (canvasH * 0.80) / Math.max(1, baseH)));
     } catch (e) {
       return 3.0;
     }
