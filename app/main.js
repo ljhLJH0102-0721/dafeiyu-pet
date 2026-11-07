@@ -249,7 +249,9 @@ function openSettings() {
     backgroundColor: '#00000000',
     hasShadow: true,
     roundedCorners: true,
-    resizable: true,
+    resizable: false,           // 透明无边框窗口四周有隐形缩放手柄，鼠标靠近会被当成拖拽（"自己变大"），关掉
+    maximizable: false,
+    fullscreenable: false,
     autoHideMenuBar: true,
     icon: path.join(__dirname, 'assets', 'icon_256.png'),
     webPreferences: {
