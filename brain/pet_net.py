@@ -209,6 +209,72 @@ def _wikipedia(query, n=4):
         return None
 
 
+
+def _bing(query, n=5):
+    """必应搜索（HTML）。百度搜索页面已经抓不到了（返回 0 条），换成必应。
+
+    返回 (titles, snippets)。
+    """
+    import html as _html
+    import re
+    import urllib.parse
+    url = "https://www.bing.com/search?q=" + urllib.parse.quote(query) + "&setlang=zh-cn&mkt=zh-CN"
+    try:
+        html = _get(url)
+    except Exception:
+        return [], []
+    if not html:
+        return [], []
+    titles = []
+    for m in re.finditer(r"<h2[^>]*>\s*<a[^>]*>(.*?)</a>", html, re.S):
+        t = re.sub(r"<[^>]+>", "", m.group(1))
+        t = _html.unescape(t)
+        t = re.sub(r"\s+", " ", t).strip()
+        if t and t not in titles:
+            titles.append(t)
+        if len(titles) >= n:
+            break
+    snips = []
+    for m in re.finditer(r'<p class="[^"]*b_lineclamp[^"]*"[^>]*>(.*?)</p>', html, re.S):
+        s = re.sub(r"<[^>]+>", "", m.group(1))
+        s = _html.unescape(s)
+        s = re.sub(r"\s+", " ", s).strip()
+        if s and s not in snips:
+            snips.append(s)
+        if len(snips) >= 3:
+            break
+    return titles, snips
+
+
+def _hot_news(query, n=6):
+    """用头条热榜回答「最近有什么新闻」这类问题（热榜抓取是通的）。"""
+    try:
+        import pet_news as N
+        hot = N.fetch_hot()
+    except Exception:
+        return None
+    if not hot:
+        return None
+    # 简单关键词过滤：query 里出现方向词就优先挑相关的
+    keys = [w for w in ("AI", "人工智能", "芯片", "游戏", "动画", "股市", "基金", "黄金",
+                        "楼市", "体育", "电影", "汽车", "手机") if w in query]
+    picked = []
+    for it in hot:
+        t = it.get("title") or ""
+        if keys and not any(k in t for k in keys):
+            continue
+        picked.append(t)
+        if len(picked) >= n:
+            break
+    if not picked:
+        picked = [(it.get("title") or "") for it in hot[:n]]
+    if not picked:
+        return None
+    lines = ["当前热搜（实时）："]
+    for i, t in enumerate(picked, 1):
+        lines.append("%d. %s" % (i, t))
+    return "\n".join(lines)
+
 def search(query, n=5):
     query = clean_query(query)
     if len(query) < 2:
@@ -217,8 +283,18 @@ def search(query, n=5):
     if not query:
         return None
     lines = []
+    # 百度搜索页已经抓不到结果了（实测 0 条），先试必应，再退回百度
+    titles, snips = [], []
     try:
-        titles, snips = _baidu(query, n)
+        titles, snips = _bing(query, n)
+    except Exception:
+        pass
+    if not titles:
+        try:
+            titles, snips = _baidu(query, n)
+        except Exception:
+            pass
+    try:
         if titles:
             lines.append("搜索结果：")
             for i, t in enumerate(titles[:n], 1):
@@ -271,6 +347,12 @@ def research(text, city=None):
         pass
     if not looks_like_info_need(s):
         return None
+    # 新闻 / 热点这类问题：直接读热榜。
+    # 必应只能搜到旧闻，"最近有什么新闻"必须用实时热榜回答。
+    if any(w in s for w in ("新闻", "热点", "热搜", "时事", "头条", "最近发生", "大事")):
+        hot = _hot_news(s, 6)
+        if hot:
+            return hot
     try:
         return search(s, 5)
     except Exception:
