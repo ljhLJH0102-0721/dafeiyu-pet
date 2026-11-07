@@ -614,10 +614,14 @@ function menuAnchorPos(w, h) {
 function positionMenu(follow) {
   if (!menuWin || menuWin.isDestroyed()) return;
   const b = menuWin.getBounds();
-  const pos = menuAnchorPos(b.width || 276, b.height || 420);
+  const w = 276;                 // 宽度固定，见 menu:resize 里的说明
+  const h = b.height || 420;
+  const pos = menuAnchorPos(w, h);
+  // 必须用 setBounds 一起钉住尺寸：只调 setPosition 时，Windows 为了保持
+  // 客户区会反推窗口大小 —— 每调一次就变宽几像素（这个坑 windowState 里踩过，
+  // 菜单这边没跟上，表现为"右键菜单一直变大"）。
   try {
-    if (follow) menuWin.setPosition(pos.x, pos.y);
-    else menuWin.setPosition(pos.x, pos.y);
+    menuWin.setBounds({ x: pos.x, y: pos.y, width: w, height: h });
   } catch (e) {}
 }
 
