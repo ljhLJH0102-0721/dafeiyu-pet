@@ -233,6 +233,8 @@ function createWindow() {
   // 唤回瞬间把交互状态重置干净：不等防抖、立刻重测一次命中
   win.on('show', () => {
     try {
+      // 唤回时重新隐藏任务栏按钮（hide/show 会让它回来）
+      try { win.setSkipTaskbar(true); } catch (e) {}
       forceNextHit = true;
       drag.active = false;
       skipUntil = 0;
@@ -748,6 +750,10 @@ function startGeometryWatchdog() {
           log('[geo] 置顶被抢，已重新置顶');
         }
       } catch (e) {}
+      // 任务栏守护：skipTaskbar 在 hide/show 之后会失效（Electron 用
+      // ITaskbarList::DeleteTab 实现，窗口重新映射时按钮会回来）。
+      // 用户看到的就是"后台突然在任务栏冒出一个图标"。
+      try { if (win.isVisible()) win.setSkipTaskbar(true); } catch (e) {}
     }
     const r = geo.assertConsistent(win.getBounds(), { dragging: drag.active });
     if (!r.ok && r.reason === 'healed') {
