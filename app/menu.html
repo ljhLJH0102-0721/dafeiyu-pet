@@ -120,9 +120,14 @@
       root.appendChild(item(it));
     }
     // 窗口高度自适应内容（等一帧，等布局稳定后再量）
+    // 注意：宽度必须用固定值。以前量的是 .menu 的宽度（= 窗口宽度 100%），
+    // 再 +2 设回窗口 —— 每开一次右键菜单就宽 2px，越点越大。
+    const MENU_WIDTH = 272;
     const doResize = () => {
-      const box = $('menu').getBoundingClientRect();
-      window.petMenu.resize(Math.ceil(box.height) + 2, Math.ceil(box.width) + 2);
+      const m = $('menu');
+      // scrollHeight 是内容实际高度（不受窗口当前高度影响）
+      const h = Math.min(720, Math.max(160, Math.ceil(m.scrollHeight) + 2));
+      window.petMenu.resize(h, MENU_WIDTH);
     };
     requestAnimationFrame(() => requestAnimationFrame(doResize));
     setTimeout(doResize, 80);
