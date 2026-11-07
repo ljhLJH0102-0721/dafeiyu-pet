@@ -285,6 +285,17 @@ export function setupInteraction(): void {
   scheduleTwist();
   (window as any).__twist = () => { state.twist = 1; return state.twist; };
 
+  // 唤回时调用：清掉可能卡住的拖动状态
+  // （窗口隐藏时如果正好在拖，mouseup 会丢，state.dragging 就永远是 true，
+  //   之后所有 mousedown 都被当成"继续拖"，表现就是拖不动）
+  (window as any).__resetDrag = () => {
+    state.dragging = false;
+    state.moved = false;
+    state.vx = 0;
+    state.vy = 0;
+    return true;
+  };
+
   // 外壳回传拖动速度，用来算摆动
   if (b.onDrag) {
     b.onDrag((info) => {

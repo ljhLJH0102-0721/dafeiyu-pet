@@ -225,6 +225,19 @@ function createWindow() {
     }, 600);
   });
 
+  // 唤回瞬间把交互状态重置干净：不等防抖、立刻重测一次命中
+  win.on('show', () => {
+    try {
+      forceNextHit = true;
+      drag.active = false;
+      skipUntil = 0;
+      lastHitAt = 0;
+      pendingHit = null;
+      pendingCount = 0;
+      runJs('(function(){ if (window.__resetDrag) window.__resetDrag(); return 1; })()').catch(() => {});
+      log('[show] 已重置交互状态');
+    } catch (e) {}
+  });
   win.on('closed', () => { win = null; });
 }
 
@@ -749,7 +762,8 @@ let cursorPinUntil = 0;   // 测试时钉住光标，别被真实光标覆盖
 let lastTopmostCheck = 0;   // 上次确认置顶的时间
 let lastHitAt = 0;      // 上次命中检测时间（光标静止也要复测）
 let hitToken = 0;       // 丢弃过期的异步结果
-let skipUntil = 0;              // 窗口正在改尺寸的这段时间不做命中检测
+let skipUntil = 0;
+let forceNextHit = false;   // 刚唤回时：第一次检测结果直接生效，不等防抖              // 窗口正在改尺寸的这段时间不做命中检测
 let lastCursor = { x: -1, y: -1 };
 let ignoreToggles = 0;          // 调试用：切换了多少次
 let hitTests = 0;               // 调试用：做了多少次命中检测
@@ -794,7 +808,11 @@ function startHitTestLoop() {
     // 窗口正在缩放/移动：这期间坐标对不上，检测结果没意义，直接跳过
     if (Date.now() < skipUntil) return;
 
-    const p = screen.getCursorScreenPoint();
+    // 调试：/test/cursor 带 forLoop 时，命中循环也吃注入坐标（真实鼠标在别处也能复现）
+    const forced = globalThis.__forceCursor;
+    const p = forced && Date.now() < (forced.until || 0)
+      ? { x: forced.x, y: forced.y }
+      : screen.getCursorScreenPoint();
 
     // 把全屏光标位置推给页面：鼠标移出她的窗口（比如移到头顶上方）后，
     // 页面收不到 mousemove，视线就会"卡住不动"。这里由外壳统一供坐标。
@@ -1025,11 +1043,33 @@ function startApiServer() {
       } catch (e) { return send(200, out); }
     }
 
+    if (url === '/test/show' && req.method === 'POST') {
+      try {
+        if (!win || win.isDestroyed()) return send(503, { ok: false, error: 'no window' });
+        win.showInactive();
+        setTimeout(() => { try { win.focus(); } catch (e) {} }, 60);
+        return send(200, { ok: true, visible: win.isVisible() });
+      } catch (e) { return send(500, { ok: false, error: String(e) }); }
+    }
+    if (url === '/test/hide' && req.method === 'POST') {
+      try {
+        if (!win || win.isDestroyed()) return send(503, { ok: false, error: 'no window' });
+        win.hide();
+        return send(200, { ok: true, visible: win.isVisible() });
+      } catch (e) { return send(500, { ok: false, error: String(e) }); }
+    }
     if (url === '/test/cursor' && req.method === 'POST') {
       return body((d) => {
         try {
           if (!win || win.isDestroyed()) return send(500, { ok: false, error: 'no window' });
           cursorPinUntil = Date.now() + Number((d && d.pinMs) || 3000);
+          if (d && d.forLoop) {
+            globalThis.__forceCursor = {
+              x: Number(d.x) || 0,
+              y: Number(d.y) || 0,
+              until: cursorPinUntil,
+            };
+          }
           try {
             win.webContents.executeJavaScript(
               'window.__cursorPinUntil = ' + cursorPinUntil + '; 1').catch(() => {});
