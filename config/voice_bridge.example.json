@@ -3,7 +3,7 @@
   "ocr_max_lines": 16,
   "context_turns": 3,
   "min_utterance_ms": 350,
-  "device_index": 11,
+  "device_index": null,
   "max_utterance_ms": 20000,
   "wake_window_s": 20,
   "speech_off_ms": 900,
@@ -43,6 +43,7 @@
   "news_interval_min": 30,
   "news_topics": [
     "AI",
-    "游戏"
+    "游戏",
+    "动画"
   ]
 }

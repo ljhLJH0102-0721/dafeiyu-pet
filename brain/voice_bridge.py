@@ -665,6 +665,7 @@ def pick_device(pa, cfg):
         return idx
 
     cands = _candidate_devices(pa, cfg.get("device_name_hint", ""))
+    log("候选输入设备 %d 个" % len(cands))
     scored = []
     for idx, name in cands:
         peak, median, err = measure_device(pa, idx)
@@ -712,7 +713,7 @@ _mutex_handle = None
 
 
 def _single_instance():
-    global _mutex_handle
+    global _mutex_handle, _hold_socket
     try:
         k32 = ctypes.windll.kernel32
         k32.SetLastError(0)
@@ -720,6 +721,16 @@ def _single_instance():
         if k32.GetLastError() == 183:      # ERROR_ALREADY_EXISTS
             return False
         _mutex_handle = h
+
+        # 互斥体在某些会话里互相看不见（实测出现过两份桥同时读麦、把声音抢没），
+        # 再加一道「端口锁」：能 bind 上才算唯一。进程退出时系统自动释放。
+        import socket as _sk
+        _hold_socket = _sk.socket(_sk.AF_INET, _sk.SOCK_STREAM)
+        try:
+            _hold_socket.bind(("127.0.0.1", 5019))
+            _hold_socket.listen(1)
+        except OSError:
+            return False
         return True
     except Exception:
         return True
@@ -1879,6 +1890,21 @@ def mic_loop(asr, brain, say_it, vad, context, cfg, device_index, stop_event):
                 _beat["at"] = _now_beat
                 log("心跳：麦克风峰值 %.4f（60s 内）设备 %s" % (
                     _beat["peak"], getattr(mic, "index", "?")))
+                # 麦克风看门狗：连续几分钟一点声音都没有就用人话提醒一次。
+                # 系统层面静音（硬件静音键 / 被别的程序占着）时，光有日志没人会去看。
+                if _beat["peak"] < 0.002:
+                    _beat["silent_min"] = _beat.get("silent_min", 0) + 1
+                else:
+                    _beat["silent_min"] = 0
+                if _beat.get("silent_min", 0) >= 3 and time.monotonic() - _beat.get("warned_at", 0) > 1800:
+                    _beat["warned_at"] = time.monotonic()
+                    try:
+                        if live2d_pet is not None:
+                            live2d_pet.bubble("麦克风好像没声音…帮我看看？", 8)
+                        say_it("我这边听不到声音，帮我检查一下麦克风好不好？")
+                    except Exception:
+                        pass
+                    log("麦克风连续 %d 分钟无输入，已提醒主人" % _beat["silent_min"])
                 _beat["peak"] = 0.0
             # 她正在说话 / 刚说完：把这一帧当静音，避免听到自己
             if time.monotonic() < _echo["until"]:
