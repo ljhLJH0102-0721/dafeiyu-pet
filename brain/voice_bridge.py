@@ -1295,6 +1295,12 @@ def _key_down(vk):
 
 
 def _ptt_sync(cfg_path, ptt):
+    # 首次同步：把现有的标记文件时间记下来，别把历史按键当成刚按下
+    if ptt.get("flag_mtime") is None:
+        try:
+            ptt["flag_mtime"] = os.path.getmtime(PTT_FLAG)
+        except Exception:
+            ptt["flag_mtime"] = None
     """把配置里的 voice_mode / ptt_key 同步到 ptt 状态（改了设置不用重启）。"""
     try:
         mt = os.path.getmtime(cfg_path)
