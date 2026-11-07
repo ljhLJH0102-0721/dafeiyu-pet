@@ -679,13 +679,36 @@ export function setupInteraction(): void {
   (window as any).__lists = () => ({ expressions: CUTE, motions: HANDS });
 
   // 做一个短表情，几秒后收回去
+  // 加冷却：表情太频繁地切会闪、也会把语音挑的表情和菜单点的表情互相顶掉
+  const EXPR_CD_SAME = 1400;   // 同一个表情，1.4 秒内重复触发直接忽略
+  const EXPR_CD_ANY = 500;     // 任意两个表情之间至少隔 0.5 秒
+  const EXPR_MERGE_MS = 400;   // 不到 0.4 秒又切，合并成最后一次（不来回闪）
+  let lastExprName = '';
+  let lastExprAt = 0;
+  let pendingExpr: { name: string; ms: number; at: number } | null = null;
+
   function flashExpression(name: string, ms = 2600): boolean {
+    const now = Date.now();
+    if (name && name === lastExprName && now - lastExprAt < EXPR_CD_SAME) return false;
+    if (now - lastExprAt < EXPR_CD_ANY) {
+      // 太近：记下最后一次，等冷却过去再放，避免连续切换闪烁
+      pendingExpr = { name, ms, at: now };
+      window.setTimeout(() => {
+        if (!pendingExpr) return;
+        const p = pendingExpr;
+        pendingExpr = null;
+        if (Date.now() - lastExprAt >= EXPR_CD_ANY) flashExpression(p.name, p.ms);
+      }, EXPR_CD_ANY - (now - lastExprAt) + 10);
+      return false;
+    }
     if (!(window as any).__expression(name)) return false;
+    lastExprName = name;
+    lastExprAt = Date.now();
     if (expressionTimer) window.clearTimeout(expressionTimer);
     expressionTimer = window.setTimeout(() => {
       idleFires++;
       (window as any).__clearExpression();
-    }, ms);
+    }, Math.max(600, ms));
     return true;
   }
   (window as any).__flashExpression = flashExpression;

@@ -19,6 +19,7 @@ pet_voice.py — 让桌宠说话。
 """
 
 import asyncio
+import hashlib
 import json
 import os
 import threading
@@ -117,7 +118,7 @@ async def _synth_edge(text, out_path, voice, rate, pitch, volume):
 def _cleanup_old(keep=12, max_age=1800):
     """清掉旧的合成音频，避免 audio 目录无限变大（每句话都会生成一个 mp3）。"""
     try:
-        files = [os.path.join(AUDIO_DIR, f) for f in os.listdir(AUDIO_DIR) if f.startswith("speak_")]
+        files = [os.path.join(AUDIO_DIR, f) for f in os.listdir(AUDIO_DIR) if f.startswith("speak_") and "_c" not in f]
         files.sort(key=lambda p: os.path.getmtime(p), reverse=True)
         now = time.time()
         for i, p in enumerate(files):
@@ -150,32 +151,70 @@ def _pick_expression(text):
     return ""
 
 def synth(text, voice=None, rate=None, pitch=None, volume=None):
-    """用 edge-tts 合成到 mp3，返回 (文件名, 预估时长秒)。失败返回 (None, 0)。"""
+    """用 edge-tts 合成到 mp3，返回 (文件名, 预估时长秒)。失败返回 (None, 0)。
+
+    加了缓存：同一句话（同音色/语速/音调）第二次直接复用，省掉 1~2 秒的联网合成。
+    固定台词（打招呼、听写提示等）会预热，所以听到几乎是即时。
+    """
     text = (text or "").strip()
     if not text:
         return None, 0.0
     os.makedirs(AUDIO_DIR, exist_ok=True)
     _cleanup_old()
-    name = _next_name()
-    out = os.path.join(AUDIO_DIR, name)
+
+    v = voice or DEFAULT_VOICE
+    r = rate or DEFAULT_RATE
+    p = pitch or DEFAULT_PITCH
+    vol = volume or DEFAULT_VOLUME
+
+    key = "\x1f".join([text, v, r, p, vol])
+    digest = hashlib.md5(key.encode("utf-8")).hexdigest()[:16]
+    cached = os.path.join(AUDIO_DIR, "speak_c%s.mp3" % digest)
+    if os.path.exists(cached) and os.path.getsize(cached) > 500:
+        return os.path.basename(cached), os.path.getsize(cached) / 6000.0
+
+    out = cached + ".part"
     try:
-        asyncio.run(_synth_edge(
-            text,
-            out,
-            voice or DEFAULT_VOICE,
-            rate or DEFAULT_RATE,
-            pitch or DEFAULT_PITCH,
-            volume or DEFAULT_VOLUME,
-        ))
+        asyncio.run(_synth_edge(text, out, v, r, p, vol))
     except Exception as exc:
         _log_err("合成失败: %s" % exc)
+        try:
+            os.remove(out)
+        except Exception:
+            pass
         return None, 0.0
     if not os.path.exists(out) or os.path.getsize(out) < 500:
         _log_err("合成产物异常: %s" % out)
         return None, 0.0
+    try:
+        os.replace(out, cached)
+    except Exception:
+        pass
     # edge-tts 默认输出 24kHz 48kbps 单声道 ≈ 6000 字节/秒
-    duration = os.path.getsize(out) / 6000.0
-    return name, duration
+    duration = os.path.getsize(cached) / 6000.0
+    return os.path.basename(cached), duration
+
+
+# 常用台词：启动时后台预热，之后说这句就是即时（本地读缓存）
+PREWARM_LINES = (
+    "主人好呀～想让我做点什么？",
+    "嘿嘿，摸摸头好舒服～",
+    "我在呢，要做什么直接说。",
+    "好，打好了。",
+    "打什么？说一下内容。",
+)
+
+
+def prewarm_async():
+    """后台预热常用台词（不阻塞启动）。"""
+    def run():
+        for line in PREWARM_LINES:
+            try:
+                synth(line)
+            except Exception:
+                pass
+            time.sleep(0.2)
+    threading.Thread(target=run, daemon=True).start()
 
 
 def speak(text, voice=None, wait=False):

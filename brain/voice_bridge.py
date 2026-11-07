@@ -744,7 +744,7 @@ class SileroSegmenter:
             cfgv = so.VadModelConfig()
             cfgv.silero_vad.model = model
             cfgv.silero_vad.threshold = float(os.environ.get("PET_VAD_THRESHOLD", "0.35"))
-            cfgv.silero_vad.min_silence_duration = float(os.environ.get("PET_VAD_TAIL", "0.45"))
+            cfgv.silero_vad.min_silence_duration = float(os.environ.get("PET_VAD_TAIL", "0.35"))
             cfgv.silero_vad.min_speech_duration = float(os.environ.get("PET_VAD_MIN", "0.25"))
             cfgv.silero_vad.window_size = 512
             cfgv.sample_rate = SAMPLE_RATE
@@ -1973,8 +1973,9 @@ def main():
         Say()(args.say)
         return
 
+    asr = DualAsr()
+
     if args.wav:
-        asr = DualAsr()
         r = asr.transcribe_file(args.wav)
         print(json.dumps({k: v for k, v in r.items() if k != "texts"}, ensure_ascii=False, indent=2))
         for lang, text in r["texts"].items():
@@ -2011,6 +2012,13 @@ def main():
     if not _single_instance():
         log("已经有一份语音桥在跑了，这份直接退出（避免重复听麦）")
         return
+
+    # 预热常用台词（打招呼等），让它们几乎即时出声
+    try:
+        import pet_voice as _pv
+        _pv.prewarm_async()
+    except Exception:
+        pass
 
     asr = DualAsr()
     try:

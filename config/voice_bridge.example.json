@@ -3,6 +3,7 @@
   "ocr_max_lines": 16,
   "context_turns": 3,
   "min_utterance_ms": 350,
+  "device_index": 11,
   "max_utterance_ms": 20000,
   "wake_window_s": 20,
   "speech_off_ms": 900,
@@ -22,17 +23,20 @@
   ],
   "confirm_window_s": 60,
   "ocr_scope": "active",
-  "merge_gap_ms": 700,
+  "merge_gap_ms": 300,
   "commands_bypass_wake": true,
   "brain_mode": "api",
   "llm": {
     "base_url": "https://api.deepseek.com",
     "model": "deepseek-flash",
-    "api_key_env": "DEEPSEEK_API_KEY",
+    "api_key_env": "ZAI_CODING_CN_API_KEY",
     "timeout_s": 30,
     "api_key": "<你的 API Key>"
   },
   "voice": {
     "name": "zh-CN-XiaoyiNeural"
-  }
+  },
+  "weather_city": "",
+  "voice_mode": "auto",
+  "ptt_key": "Backquote"
 }
