@@ -1023,6 +1023,10 @@ function startApiServer() {
         try {
           if (!win || win.isDestroyed()) return send(500, { ok: false, error: 'no window' });
           cursorPinUntil = Date.now() + Number((d && d.pinMs) || 3000);
+          try {
+            win.webContents.executeJavaScript(
+              'window.__cursorPinUntil = ' + cursorPinUntil + '; 1').catch(() => {});
+          } catch (e) {}
           win.webContents.send('pet:cursor', { x: Number((d && d.x) || 0), y: Number((d && d.y) || 0) });
           return send(200, { ok: true });
         } catch (err) { return send(500, { ok: false, error: String(err) }); }
