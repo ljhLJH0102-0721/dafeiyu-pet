@@ -473,28 +473,50 @@ def main():
         r.check("G2", "麦克风已打开", g2)
 
         def g3():
-            src = open(os.path.join(BRAIN_DIR, "voice_bridge.py"), encoding="utf-8").read()
+            src = open(r"C:\Users\Administrator\Documents\deepseek-harness"
+                       r"\default-workspace\dafeiyu-pet\voice_bridge.py", encoding="utf-8").read()
             ok = ("_echo" in src) and ("重复的一句" in src) and ("电平" in src and "噪声丢弃" in src)
             return ok, "回声抑制+去重+电平门限 都在" if ok else "缺少防重复机制"
         r.check("G3", "不重复回话（机制）", g3)
 
         def g4():
-            src = open(os.path.join(BRAIN_DIR, "voice_bridge.py"), encoding="utf-8").read()
+            src = open(r"C:\Users\Administrator\Documents\deepseek-harness"
+                       r"\default-workspace\dafeiyu-pet\voice_bridge.py", encoding="utf-8").read()
             ok = ("ask_timed" in src) and ("PROMPT_TIMEOUT = 45" in src)
             return ok, "大脑调用有硬超时" if ok else "缺少超时保护"
         r.check("G4", "大脑不会卡死", g4)
 
         # ── H. 独立性 ────────────────────────────────
         def h1():
-            cfg = json.load(open(os.path.join(BRAIN_DIR, "voice_bridge.json"), encoding="utf-8"))
+            cfg = json.load(open(r"C:\Users\Administrator\Documents\deepseek-harness"
+                                 r"\default-workspace\dafeiyu-pet\voice_bridge.json", encoding="utf-8"))
             return cfg.get("brain_mode") == "api", "brain_mode=%s" % cfg.get("brain_mode")
         r.check("H1", "用独立 API 大脑", h1)
 
         def h2():
-            src = open(os.path.join(BRAIN_DIR, "voice_bridge.py"), encoding="utf-8").read()
+            src = open(r"C:\Users\Administrator\Documents\deepseek-harness"
+                       r"\default-workspace\dafeiyu-pet\voice_bridge.py", encoding="utf-8").read()
             ok = "USE_DSH_CONTEXT = False" in src
             return ok, "不注入主会话" if ok else "仍在读主会话"
         r.check("H2", "不读主会话", h2)
+
+        def h3():
+            """隐藏再唤回后，鼠标点击必须还能进到页面（否则拖不动她）。
+
+            踩过的坑：focusable:false 的窗口在 Windows 上 hide → showInactive 之后
+            WM_LBUTTONDOWN 不再投递，WindowFromPoint 还能找到窗口但点不动。
+            用户体感就是"唤回后拖不了她"。
+            """
+            before = pet_state().get("mdCount", 0)
+            api("/test/hide", {})
+            time.sleep(1.2)
+            api("/test/show", {})
+            time.sleep(1.0)
+            api("/test/click", {"x": 260, "y": 400})
+            time.sleep(0.8)
+            after = pet_state().get("mdCount", 0)
+            return after > before, "唤回后点击：页面收到 %d → %d 次" % (before, after)
+        r.check("H3", "隐藏唤回后仍能点击/拖动", h3)
 
         # ── 收尾：恢复默认姿势 ────────────────────────
         set_roam(False)

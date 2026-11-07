@@ -173,7 +173,12 @@ function createWindow() {
 
   win = new BrowserWindow({
     title: '大肥鱼',
-    focusable: false,          // 永不抢键盘焦点：她在前台也不影响你打字
+    // 必须是可聚焦窗口。
+    // focusable:false 的窗口在 Windows 上"隐藏再显示"之后就再也收不到鼠标点击了
+    // （WindowFromPoint 还能找到它，但 WM_LBUTTONDOWN 不投递）——
+    // 实测：隐藏→showInactive 后点她毫无反应；setFocusable(true) 立刻恢复。
+    // 代价：点她时她的窗口会拿到焦点（拖动必然要求能接收点击）。
+    focusable: true,
     width: bounds.width,
     height: bounds.height,
     x: bounds.x,
@@ -234,6 +239,11 @@ function createWindow() {
       lastHitAt = 0;
       pendingHit = null;
       pendingCount = 0;
+      // 关键：唤回后直接让窗口接收鼠标 1.5 秒。
+      // 命中检测要等光标移动 + 防抖，这期间窗口是点击穿透的，
+      // 用户一唤回就去抓她会抓到桌面 → 体感"拖不动"。
+      try { applyIgnore(false, true); } catch (e) {}
+      setTimeout(() => { forceNextHit = true; lastHitAt = 0; }, 1500);
       runJs('(function(){ if (window.__resetDrag) window.__resetDrag(); return 1; })()').catch(() => {});
       log('[show] 已重置交互状态');
     } catch (e) {}
@@ -771,6 +781,7 @@ let hitTests = 0;               // 调试用：做了多少次命中检测
 function applyIgnore(next, force) {
   if (!win || win.isDestroyed()) return;
   const now = Date.now();
+  if (next !== ignoringNow) log('[ignore]', ignoringNow ? '穿透' : '可交互', '→', next ? '穿透' : '可交互', force ? '(强制)' : '');
   if (next === ignoringNow) {
     pendingHit = null;
     pendingCount = 0;
@@ -842,7 +853,11 @@ function startHitTestLoop() {
     cmd('hitTest', { x: cx, y: cy })
       .then((hit) => {
         if (token !== hitToken) return;   // 有更新的一次检测了，丢弃旧结果
-        applyIgnore(!hit);
+        // 非对称防抖：
+        //   命中（光标确实落在她身上）→ 立刻切成可交互，否则用户一按下就落到桌面上；
+        //   落空（透明处）→ 仍然防抖两次，避免边界抖动导致窗口状态来回闪。
+        forceNextHit = false;
+        applyIgnore(!hit, !!hit);
       })
       .catch(() => {
         // 页面没响应时宁可放行鼠标：挡住整个桌面比点不到她严重得多
@@ -922,7 +937,14 @@ function refreshTrayMenu() {
       label: '显示 / 隐藏',
       click: () => {
         if (!win) return createWindow();
-        if (win.isVisible()) win.hide(); else win.showInactive();
+        if (win.isVisible()) {
+          win.hide();
+        } else {
+          // 唤回时重新激活输入（focusable 窗口 + focus），否则可能收不到点击
+          try { win.setFocusable(true); } catch (e) {}
+          win.showInactive();
+          setTimeout(() => { try { win.focus(); } catch (e) {} }, 60);
+        }
       },
     },
     {
@@ -1056,6 +1078,27 @@ function startApiServer() {
         if (!win || win.isDestroyed()) return send(503, { ok: false, error: 'no window' });
         win.hide();
         return send(200, { ok: true, visible: win.isVisible() });
+      } catch (e) { return send(500, { ok: false, error: String(e) }); }
+    }
+    // 测试：不带 forward 选项地恢复鼠标（验证 Electron forward:true 的残留问题）
+    // 测试：唤回后换几种方式重新激活，看书能不能收到点击
+    if (url === '/test/click' && req.method === 'POST') {
+      try {
+        if (!win || win.isDestroyed()) return send(503, { ok: false, error: 'no window' });
+        return body((d) => {
+          const x = Number((d && d.x) || 0);
+          const y = Number((d && d.y) || 0);
+          const opts = { x, y, button: 'left', clickCount: 1 };
+          win.webContents.sendInputEvent({ type: 'mouseMove', x, y });
+          win.webContents.sendInputEvent({ type: 'mouseDown', ...opts });
+          setTimeout(() => {
+            try {
+              win.webContents.sendInputEvent({ type: 'mouseMove', x: x - 60, y: y + 40 });
+              win.webContents.sendInputEvent({ type: 'mouseUp', ...opts });
+            } catch (e) {}
+          }, 120);
+          return send(200, { ok: true, sent: [x, y] });
+        });
       } catch (e) { return send(500, { ok: false, error: String(e) }); }
     }
     if (url === '/test/cursor' && req.method === 'POST') {

@@ -398,6 +398,14 @@ export function setupInteraction(): void {
   window.addEventListener(
     'mousedown',
     (ev: MouseEvent) => {
+      // 调试：记录真实鼠标按下（判断事件有没有进到页面）
+      {
+        const w = window as any;
+        const dbg = w.__mdbg || (w.__mdbg = { n: 0, last: null, onChar: null });
+        dbg.n++;
+        dbg.last = { x: ev.clientX, y: ev.clientY, button: ev.button, tgt: (ev.target as any)?.tagName || '?' };
+        dbg.onChar = isOnCharacter(ev.clientX, ev.clientY);
+      }
       if (ev.button !== 0) return;
       if (!isOnCharacter(ev.clientX, ev.clientY)) return;
       state.dragging = true;
@@ -948,6 +956,9 @@ export function setupInteraction(): void {
     lastXY: diag.lastXY,
     // 视线（调试/测试用）：外壳推光标时这两个值应该跟着变
     fps: fpsValue,
+    mdCount: ((window as any).__mdbg || {}).n || 0,
+    mdLast: ((window as any).__mdbg || {}).last || null,
+    mdOnChar: ((window as any).__mdbg || {}).onChar,
     frameMaxMs: Math.round(frameMsMax * 10) / 10,
     gazeX: Math.round(state.gazeX * 100) / 100,
     gazeY: Math.round(state.gazeY * 100) / 100,
