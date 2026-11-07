@@ -744,7 +744,7 @@ class SileroSegmenter:
             cfgv = so.VadModelConfig()
             cfgv.silero_vad.model = model
             cfgv.silero_vad.threshold = float(os.environ.get("PET_VAD_THRESHOLD", "0.35"))
-            cfgv.silero_vad.min_silence_duration = float(os.environ.get("PET_VAD_TAIL", "0.35"))
+            cfgv.silero_vad.min_silence_duration = float(os.environ.get("PET_VAD_TAIL", "0.45"))
             cfgv.silero_vad.min_speech_duration = float(os.environ.get("PET_VAD_MIN", "0.25"))
             cfgv.silero_vad.window_size = 512
             cfgv.sample_rate = SAMPLE_RATE
@@ -1848,6 +1848,15 @@ def mic_loop(asr, brain, say_it, vad, context, cfg, device_index, stop_event):
             flush()
 
             if utt:
+                # 主人开口把她打断了：先把她的声音停掉，别盖住主人
+                if time.monotonic() < _echo["until"]:
+                    try:
+                        import pet_voice as _pv_stop
+                        _pv_stop.stop()
+                    except Exception:
+                        pass
+                    _echo["until"] = 0.0
+                    log("主人打断，已停止说话")
                 _auto_state["last_speech"] = time.monotonic()
                 # 这一句说完了：PTT 的收音窗口关闭，等下一次按键
                 _ptt["open_until"] = 0.0

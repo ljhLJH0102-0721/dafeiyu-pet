@@ -25,6 +25,8 @@ interface PetBridge {
   onOptions?: (cb: (opt: any) => void) => void;
   /** 滚轮缩放：让外壳把窗口改大/改小（几何由 shell 的 windowState 统一处理） */
   scaleBy?: (factor: number) => void;
+  /** 全屏光标位置（外壳每 40ms 推一次）：鼠标离开她的窗口也能跟随 */
+  onCursor?: (cb: (pos: { x: number; y: number }) => void) => void;
 }
 
 function bridge(): PetBridge {
@@ -56,7 +58,7 @@ function paramHold(): Record<string, number> {
 }
 
 // 诊断计数器（调试接口 /debug 会读）
-const diag = { moves: 0, hits: 0, lastAlpha: -1, lastXY: [0, 0] as number[] };
+const diag = { moves: 0, hits: 0, lastAlpha: -1, lastXY: [0, 0] as number[], cursor: 0 };
 
 function setParam(name: string, value: number): void {
   paramHold()[name] = value;
@@ -186,6 +188,32 @@ export function setupInteraction(): void {
 
   try {
     const b0 = bridge();
+    // 全屏光标跟随：外壳每 40ms 推一次屏幕坐标。
+    // 为什么需要它：页面只在鼠标进入她的窗口时才收到 mousemove，
+    // 鼠标移到头顶上方（窗口外）视线就卡住不动了 —— 这就是"断连"。
+    if (b0.onCursor) {
+      b0.onCursor((pos: any) => {
+        try {
+          const sx = Number(pos.x);
+          const sy = Number(pos.y);
+          if (!isFinite(sx) || !isFinite(sy)) return;
+          // 她"头部"在屏幕上的位置：窗口左上 + 画布内头部位置
+          const rect = canvas.getBoundingClientRect();
+          const headX = (window.screenX || window.screenLeft) + rect.left + rect.width * 0.5;
+          // 头大概在窗口上方 30% 处（模型头顶往下一点）
+          const headY = (window.screenY || window.screenTop) + rect.top + rect.height * 0.30;
+          // 用半个屏幕当量程，鼠标在全屏任何位置都能带动她抬头/低头
+          const halfW = Math.max(420, (window.screen.width || 1920) * 0.5);
+          const halfH = Math.max(300, (window.screen.height || 1080) * 0.45);
+          const nx = (sx - headX) / halfW;
+          const ny = (sy - headY) / halfH;
+          state.targetGazeX = Math.max(-1, Math.min(1, nx * 1.6));
+          state.targetGazeY = Math.max(-1, Math.min(1, ny * 1.6));
+          state.lastMoveAt = performance.now();
+          diag.cursor++;
+        } catch (e) {}
+      });
+    }
     if (b0.onOptions) {
       b0.onOptions((opt: any) => {
         roamMode = !!opt.roamMode;
@@ -869,6 +897,12 @@ export function setupInteraction(): void {
     hits: diag.hits,
     lastAlpha: diag.lastAlpha,
     lastXY: diag.lastXY,
+    // 视线（调试/测试用）：外壳推光标时这两个值应该跟着变
+    gazeX: Math.round(state.gazeX * 100) / 100,
+    gazeY: Math.round(state.gazeY * 100) / 100,
+    targetGazeX: Math.round(state.targetGazeX * 100) / 100,
+    targetGazeY: Math.round(state.targetGazeY * 100) / 100,
+    cursorEvents: diag.cursor,
     canvasSize: [canvas.width, canvas.height],
     rect: (() => {
       const r = canvas.getBoundingClientRect();

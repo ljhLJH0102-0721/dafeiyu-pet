@@ -662,6 +662,8 @@ let ignoringNow = true;
 let lastIgnoreChange = 0;
 let pendingHit = null;
 let pendingCount = 0;
+let lastCursorSent = { x: -1, y: -1 };   // 上次推给页面的光标位置
+let lastCursorSentAt = 0;
 let lastTopmostCheck = 0;   // 上次确认置顶的时间
 let lastHitAt = 0;      // 上次命中检测时间（光标静止也要复测）
 let hitToken = 0;       // 丢弃过期的异步结果
@@ -711,6 +713,16 @@ function startHitTestLoop() {
     if (Date.now() < skipUntil) return;
 
     const p = screen.getCursorScreenPoint();
+
+    // 把全屏光标位置推给页面：鼠标移出她的窗口（比如移到头顶上方）后，
+    // 页面收不到 mousemove，视线就会"卡住不动"。这里由外壳统一供坐标。
+    const nowC = Date.now();
+    if ((p.x !== lastCursorSent.x || p.y !== lastCursorSent.y) && nowC - lastCursorSentAt > 40) {
+      lastCursorSent = { x: p.x, y: p.y };
+      lastCursorSentAt = nowC;
+      try { win.webContents.send('pet:cursor', { x: p.x, y: p.y }); } catch (e) {}
+    }
+
     const moved = p.x !== lastCursor.x || p.y !== lastCursor.y;
     // 关键修复：以前「光标不动就 return」，导致状态永久冻结在"接收鼠标"，
     // 结果是窗口变成一块挡板，她周围的东西全点不了。
@@ -920,6 +932,17 @@ function startApiServer() {
     // 脚本化退出（stop-pet.ps1 用）
     // 在设置窗口里执行 JS（调试 / 自动化测试用）
     // 直接触发一个菜单动作（自动化测试用）
+    // 注入一个光标位置（自动化测试「全屏跟随」用；真实运行时由系统光标驱动）
+    if (url === '/test/cursor' && req.method === 'POST') {
+      return body((d) => {
+        try {
+          if (!win || win.isDestroyed()) return send(500, { ok: false, error: 'no window' });
+          win.webContents.send('pet:cursor', { x: Number((d && d.x) || 0), y: Number((d && d.y) || 0) });
+          return send(200, { ok: true });
+        } catch (err) { return send(500, { ok: false, error: String(err) }); }
+      });
+    }
+
     if (url === '/menu/act' && req.method === 'POST') {
       return body((d) => {
         try {

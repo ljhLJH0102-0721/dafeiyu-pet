@@ -336,7 +336,7 @@ def main():
         r.check("E3", "设置窗口能关闭", e3)
 
         def e4():
-            html = open(os.path.join(APP_DIR, "settings.html"), encoding="utf-8").read()
+            html = open(r"C:\ai-pet-live2d\pet-shell\settings.html", encoding="utf-8").read()
             ok = "window.petSettings.close()" in html and "900" in html
             return ok, "保存后自动关闭已实现" if ok else "保存后不会自动关闭"
         r.check("E4", "保存后自动关闭", e4)
@@ -405,6 +405,28 @@ def main():
             return (st[0] < 1000 and tf == "none"), "窗口 %dx%d transform=%s" % (st[0], st[1], tf)
         r.check("F5", "退出漫游恢复", f5)
 
+        def f6():
+            """全屏跟随：鼠标在她的窗口外（头顶/脚下/左右）也要带动视线。"""
+            w = window_rect(hwnd)
+            cx = w["x"] + w["w"] // 2
+            cy = w["y"] + w["h"] // 2
+            cases = [
+                ("上", cx, w["y"] - 300, "y", -1, -0.5),
+                ("下", cx, w["y"] + w["h"] + 300, "y", 0.5, 1),
+                ("左", w["x"] - 400, cy, "x", -1, -0.5),
+                ("右", w["x"] + w["w"] + 400, cy, "x", 0.5, 1),
+            ]
+            bad = []
+            for label, x, y, axis, lo, hi in cases:
+                api("/test/cursor", {"x": x, "y": y})
+                time.sleep(0.7)
+                st = pet_state()
+                v = st.get("targetGazeY" if axis == "y" else "targetGazeX")
+                if v is None or not (lo <= v <= hi):
+                    bad.append("%s=%s" % (label, v))
+            return (not bad), ("四个方向都跟上了" if not bad else "没跟上：" + "、".join(bad))
+        r.check("F6", "全屏跟随（含抬头/低头）", f6)
+
         # ── G. 语音桥 ─────────────────────────────────
         def g1():
             import subprocess
@@ -423,25 +445,29 @@ def main():
         r.check("G2", "麦克风已打开", g2)
 
         def g3():
-            src = open(os.path.join(BRAIN_DIR, "voice_bridge.py"), encoding="utf-8").read()
+            src = open(r"C:\Users\Administrator\Documents\deepseek-harness"
+                       r"\default-workspace\dafeiyu-pet\voice_bridge.py", encoding="utf-8").read()
             ok = ("_echo" in src) and ("重复的一句" in src) and ("电平" in src and "噪声丢弃" in src)
             return ok, "回声抑制+去重+电平门限 都在" if ok else "缺少防重复机制"
         r.check("G3", "不重复回话（机制）", g3)
 
         def g4():
-            src = open(os.path.join(BRAIN_DIR, "voice_bridge.py"), encoding="utf-8").read()
+            src = open(r"C:\Users\Administrator\Documents\deepseek-harness"
+                       r"\default-workspace\dafeiyu-pet\voice_bridge.py", encoding="utf-8").read()
             ok = ("ask_timed" in src) and ("PROMPT_TIMEOUT = 45" in src)
             return ok, "大脑调用有硬超时" if ok else "缺少超时保护"
         r.check("G4", "大脑不会卡死", g4)
 
         # ── H. 独立性 ────────────────────────────────
         def h1():
-            cfg = json.load(open(os.path.join(BRAIN_DIR, "voice_bridge.json"), encoding="utf-8"))
+            cfg = json.load(open(r"C:\Users\Administrator\Documents\deepseek-harness"
+                                 r"\default-workspace\dafeiyu-pet\voice_bridge.json", encoding="utf-8"))
             return cfg.get("brain_mode") == "api", "brain_mode=%s" % cfg.get("brain_mode")
         r.check("H1", "用独立 API 大脑", h1)
 
         def h2():
-            src = open(os.path.join(BRAIN_DIR, "voice_bridge.py"), encoding="utf-8").read()
+            src = open(r"C:\Users\Administrator\Documents\deepseek-harness"
+                       r"\default-workspace\dafeiyu-pet\voice_bridge.py", encoding="utf-8").read()
             ok = "USE_DSH_CONTEXT = False" in src
             return ok, "不注入主会话" if ok else "仍在读主会话"
         r.check("H2", "不读主会话", h2)

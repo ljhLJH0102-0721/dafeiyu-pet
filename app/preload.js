@@ -24,4 +24,10 @@ contextBridge.exposeInMainWorld('pet', {
       try { cb(info || { vx: 0, vy: 0 }); } catch (e) {}
     });
   },
+  // 外壳回传全屏光标位置：鼠标离开她的窗口（比如移到头顶上方）也能跟随
+  onCursor: (cb) => {
+    ipcRenderer.on('pet:cursor', (_event, pos) => {
+      try { cb(pos || {}); } catch (e) {}
+    });
+  },
 });
