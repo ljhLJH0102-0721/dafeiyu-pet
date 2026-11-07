@@ -151,20 +151,12 @@ export class LAppDelegate {
       gl.enable(gl.BLEND);
       gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
 
-      // ── 自适应帧率 ──────────────────────────────────────
-      // 这个模型的绘制对象有 715 个（遮罩引用 298 个），在集显上一帧要 20+ ms，
-      // 硬跑 60 会被迫丢帧、时间抖动（看起来就是"掉帧"）。
-      // 所以按实测耗时挑一个能稳定维持的目标帧率：慢机器跑 30，快机器跑 60。
+      // ── 每帧都画（不要跳帧！）───────────────────────────
+      // 曾经试过"隔帧不画"来省性能，结果透明窗口每到跳过的帧就被合成器
+      // 显示成空白/黑块 → 整块屏幕闪。透明窗口必须每帧都提交内容。
       const wstats = window as any;
-      const nowFrame = performance.now();
-      const fsz = wstats.__frameSched || (wstats.__frameSched = { last: 0, budget: 1000 / 30, avg: 20 });
-      const wait = fsz.budget - (nowFrame - fsz.last);
-      if (wait > 2) {
-        fsz.skipped = (fsz.skipped || 0) + 1;
-        requestAnimationFrame(loop);
-        return;
-      }
-      fsz.last = nowFrame;
+      const fsz = wstats.__frameSched || (wstats.__frameSched = { last: 0, rendered: 0 });
+      fsz.last = performance.now();
       fsz.rendered = (fsz.rendered || 0) + 1;
 
       // 描画更新
@@ -184,20 +176,7 @@ export class LAppDelegate {
           s.sum = 0;
           s.n = 0;
           s.max = Math.round(s.max * 100) / 100;
-          // 按实测耗时定目标帧率：>18ms 就锁 30，<10ms 才敢跑 60，中间 45
-          const fsc = (window as any).__frameSched;
-          if (fsc) {
-            fsc.avg = s.avg;
-            // 想手动指定就 localStorage.setItem('pet.fps', '60')
-            const forced = Number(window.localStorage.getItem('pet.fps') || 0);
-            const want = (forced >= 15 && forced <= 144)
-              ? forced
-              : (s.avg > 16 ? 30 : 60);
-            const budget = 1000 / want;
-            // 平滑过渡，避免帧率来回跳
-            fsc.budget = Math.round((fsc.budget * 0.7 + budget * 0.3) * 100) / 100;
-            fsc.target = Math.round(1000 / fsc.budget);
-          }
+
         }
       }
 
