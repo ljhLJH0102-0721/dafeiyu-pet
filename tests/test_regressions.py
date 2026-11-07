@@ -336,7 +336,7 @@ def main():
         r.check("E3", "设置窗口能关闭", e3)
 
         def e4():
-            html = open(r"C:\ai-pet-live2d\pet-shell\settings.html", encoding="utf-8").read()
+            html = open(os.path.join(APP_DIR, "settings.html"), encoding="utf-8").read()
             ok = "window.petSettings.close()" in html and "900" in html
             return ok, "保存后自动关闭已实现" if ok else "保存后不会自动关闭"
         r.check("E4", "保存后自动关闭", e4)
@@ -423,29 +423,25 @@ def main():
         r.check("G2", "麦克风已打开", g2)
 
         def g3():
-            src = open(r"C:\Users\Administrator\Documents\deepseek-harness"
-                       r"\default-workspace\dafeiyu-pet\voice_bridge.py", encoding="utf-8").read()
+            src = open(os.path.join(BRAIN_DIR, "voice_bridge.py"), encoding="utf-8").read()
             ok = ("_echo" in src) and ("重复的一句" in src) and ("电平" in src and "噪声丢弃" in src)
             return ok, "回声抑制+去重+电平门限 都在" if ok else "缺少防重复机制"
         r.check("G3", "不重复回话（机制）", g3)
 
         def g4():
-            src = open(r"C:\Users\Administrator\Documents\deepseek-harness"
-                       r"\default-workspace\dafeiyu-pet\voice_bridge.py", encoding="utf-8").read()
+            src = open(os.path.join(BRAIN_DIR, "voice_bridge.py"), encoding="utf-8").read()
             ok = ("ask_timed" in src) and ("PROMPT_TIMEOUT = 45" in src)
             return ok, "大脑调用有硬超时" if ok else "缺少超时保护"
         r.check("G4", "大脑不会卡死", g4)
 
         # ── H. 独立性 ────────────────────────────────
         def h1():
-            cfg = json.load(open(r"C:\Users\Administrator\Documents\deepseek-harness"
-                                 r"\default-workspace\dafeiyu-pet\voice_bridge.json", encoding="utf-8"))
+            cfg = json.load(open(os.path.join(BRAIN_DIR, "voice_bridge.json"), encoding="utf-8"))
             return cfg.get("brain_mode") == "api", "brain_mode=%s" % cfg.get("brain_mode")
         r.check("H1", "用独立 API 大脑", h1)
 
         def h2():
-            src = open(r"C:\Users\Administrator\Documents\deepseek-harness"
-                       r"\default-workspace\dafeiyu-pet\voice_bridge.py", encoding="utf-8").read()
+            src = open(os.path.join(BRAIN_DIR, "voice_bridge.py"), encoding="utf-8").read()
             ok = "USE_DSH_CONTEXT = False" in src
             return ok, "不注入主会话" if ok else "仍在读主会话"
         r.check("H2", "不读主会话", h2)
