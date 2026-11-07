@@ -609,27 +609,31 @@ export class LAppModel extends CubismUserModel {
     // 外部只往 window.__paramHold 里写，这里每帧在模型提交前套用一次。
     // __faceHold 优先级更高（面捕实时数据，会盖掉脚本写的值）。
     try {
+      // 参数名 → 下标 的索引（只建一次）。
+      // 以前每个参数都从头扫 509 个 id：几十个参数就是每帧三万多字符串比较，
+      // 实测能吃掉 5~8ms。建完索引后是一次哈希查找。
+      const raw: any = (this._model as any)._model;
+      if (!(this as any)._paramIndex) {
+        const ids: any = raw.parameters.ids;
+        const idx = new Map<string, number>();
+        for (let i = 0; i < ids.length; i++) {
+          const id = ids[i];
+          const name =
+            typeof id === 'string' ? id : id && id._id && id._id.s ? id._id.s : '';
+          if (name) idx.set(name, i);
+        }
+        (this as any)._paramIndex = idx;
+      }
+      const pIndex: Map<string, number> = (this as any)._paramIndex;
+      const vals: any = raw.parameters.values;
+
       const applyHold = (hold: any) => {
         if (!hold) return;
-        const raw: any = (this._model as any)._model;
-        const ids: any = raw.parameters.ids;
-        const vals: any = raw.parameters.values;
         for (const key of Object.keys(hold)) {
           const want = Number(hold[key]);
           if (!isFinite(want)) continue;
-          for (let i = 0; i < ids.length; i++) {
-            const id = ids[i];
-            const name =
-              typeof id === 'string'
-                ? id
-                : id && id._id && id._id.s
-                ? id._id.s
-                : '';
-            if (name === key) {
-              vals[i] = want;
-              break;
-            }
-          }
+          const i = pIndex.get(key);
+          if (i !== undefined) vals[i] = want;
         }
       };
       applyHold((window as any).__paramHold);

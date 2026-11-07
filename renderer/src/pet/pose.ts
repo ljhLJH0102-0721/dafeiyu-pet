@@ -128,6 +128,62 @@ export function computePose(input: PoseInput): PoseParams {
     params['ParamBodyAngleX'] = bodyX;
   }
 
+  // ── 下半身：裙摆 / 胯部 / 尾鳍 ─────────────────────────────
+  // 这个模型（VTube 系）下半身有 60 多个参数，但 physics 的驱动输入全是 0，
+  // 所以默认状态下裙子、尾巴一动不动。这里直接给它们加呼吸感的慢摆，
+  // 参数写在 paramHold 里 → 在模型 update 之前套用，会盖掉 physics 的 0 值。
+  // 幅度都压得很小，避免看起来像在抽搐。
+  const slow1 = Math.sin(t * 0.55);
+  const slow2 = Math.sin(t * 0.82 + 1.3);
+  const slow3 = Math.sin(t * 1.15 + 2.1);
+  const breathe = Math.sin(t * 1.6);
+  const move = Math.max(-1, Math.min(1, swayX / 6)) * 0.6;   // 被拖动时的惯性
+
+  // 胯：轻微重心变化（角度单位是度，范围 ±30）
+  params['HipAngleX'] = (slow1 * 4.2 + move * 5.0) * idleAmp;
+  params['HipAngleZ'] = (slow2 * 3.0 + move * 2.5) * idleAmp;
+  params['HipAngleYDOWN'] = (breathe * 0.6) * idleAmp;
+
+  // 裙子四片：相位错开，越外层越滞后（看起来像布料跟得上身体）
+  const skirtAmp = 0.34;
+  params['SkirtX1'] = (slow1 * skirtAmp + move * 0.5) * 0.8;
+  params['SkirtX2'] = (Math.sin(t * 0.55 - 0.35) * skirtAmp + move * 0.6) * 0.9;
+  params['SkirtX3'] = (Math.sin(t * 0.55 - 0.7) * skirtAmp + move * 0.7) * 1.0;
+  params['SkirtX4'] = (Math.sin(t * 0.55 - 1.05) * skirtAmp + move * 0.8) * 1.1;
+  params['SkirtY'] = breathe * 0.10;
+  params['SkirtY2'] = Math.sin(t * 1.6 - 0.4) * 0.08;
+  params['SkirtYBS'] = breathe * 0.06;
+
+  // 裙摆分层：更慢、更小，做出"两层布料"的感觉
+  const layerAmp = 0.20;
+  for (let i = 1; i <= 3; i++) {
+    params['SkirtLayerX' + i] = Math.sin(t * 0.5 - i * 0.22) * layerAmp + move * (0.18 * i);
+  }
+
+  // 蕾丝边：只留最外层两条（参数少、效果一样）
+  params['LaceX1'] = Math.sin(t * 0.48 - 0.3) * 0.16;
+  params['LaceX3'] = Math.sin(t * 0.48 - 0.9) * 0.16;
+
+  // 尾巴（Wing*）：轻轻开合，幅度小但能看出来在动
+  params['WingOpenClose'] = 0.16 + breathe * 0.20;
+  params['WingSpread'] = 0.10 + slow3 * 0.16;
+  params['WingRotation'] = slow2 * 0.18;
+
+  // 鳍/耳（LEar / REar / Flip）：跟着呼吸轻微抖（各留两节就够了）
+  for (let i = 1; i <= 2; i++) {
+    const k = 0.07 + i * 0.03;
+    params['LEar' + i] = Math.sin(t * 1.7 - i * 0.25) * k;
+    params['REar' + i] = Math.sin(t * 1.7 - i * 0.25 + 0.5) * k;
+  }
+  params['LFlip'] = Math.sin(t * 1.1) * 0.05;
+  params['RFlip'] = Math.sin(t * 1.1 + 0.4) * 0.05;
+
+  // 胸口：呼吸起伏
+  // 身体整体左右重心（配合腹部）
+  params['ParamBodyAngleY'] = Math.sin(t * 0.45) * 1.6 * idleAmp;
+  params['ChestY1'] = breathe * 0.06;
+  params['ChestY2'] = Math.sin(t * 1.6 - 0.3) * 0.05;
+
   return params;
 }
 

@@ -239,10 +239,10 @@ function openSettings() {
     return;
   }
   settingsWin = new BrowserWindow({
-    width: 760,
-    height: 620,
-    minWidth: 700,
-    minHeight: 540,
+    width: 900,
+    height: 720,
+    minWidth: 780,
+    minHeight: 600,
     title: '大肥鱼 · 设置',
     frame: false,                 // 自绘标题栏：圆角 + 蓝白，且能用 CSS 做拖动区
     transparent: true,
