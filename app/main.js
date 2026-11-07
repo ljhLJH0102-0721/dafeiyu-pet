@@ -7,7 +7,7 @@
 // 5) 托盘图标（显示/隐藏、复位、退出）
 // 6) 本地控制接口（127.0.0.1:5011）：口型 / 参数 / 反应
 
-const { app, BrowserWindow, screen, Tray, Menu, ipcMain, nativeImage, session } = require('electron');
+const { app, BrowserWindow, screen, Tray, Menu, ipcMain, nativeImage, session, globalShortcut } = require('electron');
 
 // 单实例：开机时「启动文件夹快捷方式」和「计划任务」可能同时拉起，第二份直接退出，
 // 否则两个进程会抢 5011 端口，出现一个空白窗口。
@@ -274,6 +274,7 @@ ipcMain.handle('settings:set', (_e, patch) => {
   try {
     const next = settingsStore.setSettings(patch || {});
     settingsApply.apply(win, next, log, { setRoam: (on) => { try { geo.setRoam(on); } catch (e) {} } });
+    syncPttShortcut();
     // 只有音色这类启动时才读的配置需要重启；API 配置支持热重载
     if (patch && patch.voice) settingsApply.restartBridge(log);
     return { ok: true, settings: next };
@@ -514,6 +515,7 @@ function handleMenuAction(id) {
       const s = settingsStore.getSettings();
       const next = settingsStore.setSettings({ roamMode: !s.roamMode });
       settingsApply.apply(win, next, log, { setRoam: (on) => { try { geo.setRoam(on); } catch (e) {} } });
+          try { syncPttShortcut(); } catch (e) {}
       break;
     }
     case 'center': {
@@ -807,6 +809,48 @@ function refreshTrayMenu() {
   ]));
 }
 
+// ── 按键说话：Electron 收键 → 写标记文件 → 语音桥读 ──────────────
+// 为什么不用 python 读键盘：这台机器不给 python 进程键盘权限（GetAsyncKeyState 恒 0），
+// 而 globalShortcut 是系统级注册，不受影响。
+let pttAccel = null;
+
+function toAccelerator(code) {
+  if (!code) return null;
+  if (/^F\d{1,2}$/.test(code)) return code;
+  if (/^Key[A-Z]$/.test(code)) return code.slice(3);
+  if (/^Digit\d$/.test(code)) return code.slice(5);
+  const map = {
+    Backquote: '`', Minus: '-', Equal: '=', BracketLeft: '[', BracketRight: ']',
+    Backslash: '\\', Semicolon: ';', Quote: "'", Comma: ',', Period: '.', Slash: '/',
+    Space: 'Space', Tab: 'Tab', CapsLock: 'Capslock', Insert: 'Insert', Delete: 'Delete',
+    Home: 'Home', End: 'End', PageUp: 'PageUp', PageDown: 'PageDown',
+    ArrowUp: 'Up', ArrowDown: 'Down', ArrowLeft: 'Left', ArrowRight: 'Right',
+  };
+  return map[code] || null;
+}
+
+function syncPttShortcut() {
+  try {
+    if (pttAccel) { globalShortcut.unregister(pttAccel); pttAccel = null; }
+  } catch (e) {}
+  let s = {};
+  try { s = settingsStore.getSettings(); } catch (e) { return; }
+  if (s.voiceMode !== 'ptt') { log('[ptt] 一直听模式，不注册快捷键'); return; }
+  const accel = toAccelerator(s.pttKey);
+  if (!accel) { log('[ptt] 这个键不支持注册：', s.pttKey); return; }
+  let ok = false;
+  try {
+    ok = globalShortcut.register(accel, () => {
+      try {
+        fs.writeFileSync(path.join(settingsStore.PET_DIR, 'ptt.flag'), String(Date.now()), 'utf8');
+      } catch (e) { log('[ptt] 写标记失败', String(e)); }
+      try { cmd('bubble', { text: '我在听…', seconds: 1.6 }).catch(() => {}); } catch (e) {}
+    });
+  } catch (e) { ok = false; }
+  if (ok) { pttAccel = accel; log('[ptt] 已注册快捷键', accel); }
+  else { log('[ptt] 注册失败（可能被别的程序占用）', accel); }
+}
+
 function setupTray() {
   // 托盘图标：优先用 assets 里的新图标（她的脸），取不到再退回内嵌的 dataURL
   let icon = nativeImage.createFromPath(path.join(__dirname, 'assets', 'icon_256.png'));
@@ -885,6 +929,7 @@ function startApiServer() {
         try {
           const next = settingsStore.setSettings(d || {});
           settingsApply.apply(win, next, log, { setRoam: (on) => { try { geo.setRoam(on); } catch (e) {} } });
+          try { syncPttShortcut(); } catch (e) {}
     // 只有音色这类启动时才读的配置需要重启；API 配置支持热重载
           if (d && d.voice) settingsApply.restartBridge(log);
           return send(200, { ok: true, settings: next });
@@ -1113,6 +1158,8 @@ app.whenReady().then(() => {
     startHitTestLoop();
     startGeometryWatchdog();
     try { settingsApply.apply(win, settingsStore.getSettings(), log, { setRoam: (on) => { try { geo.setRoam(on); } catch (e) {} } }); } catch (e) {}
+    // 按键说话：启动时按设置注册（一直听模式不会注册）
+    try { syncPttShortcut(); } catch (e) { log('[ptt] 启动注册失败', String(e)); }
 
     // 全局热键：切换「点击穿透 / 可交互」。桌宠被堵住又不想开托盘时按这个。
     try {
@@ -1137,6 +1184,7 @@ app.whenReady().then(() => {
 });
 
 app.on('will-quit', () => {
+  try { globalShortcut.unregisterAll(); } catch (e) {}
   try {
     const { globalShortcut } = require('electron');
     globalShortcut.unregisterAll();

@@ -188,6 +188,11 @@ MODEL_DIR = os.path.join(
 SOCKET_NAME = "dafeiyu-pet-whale-single-instance"
 LOG_PATH = os.path.join(HERE, "voice_bridge.log")
 CFG_PATH = os.path.join(HERE, "voice_bridge.json")
+
+# PTT 标记文件：Electron 那边按到快捷键就写一次，桥这边读到就开始收音。
+# 为什么要这样：这台机器不允许 python 进程读键盘/注入输入（GetAsyncKeyState 恒为 0），
+# 但 Electron 在主进程里用 globalShortcut 注册热键是系统级的，不受那个限制。
+PTT_FLAG = os.path.join(HERE, "ptt.flag")
 PROMPT_TIMEOUT = 45        # 聊天：45 秒足够（模型思考 1~6 秒）
 PROMPT_TIMEOUT_TASK = 180  # 真干活：要调工具跑命令，实测 30~50 秒，给足余量
 SAMPLE_RATE = 16000
@@ -1310,9 +1315,29 @@ def _ptt_sync(cfg_path, ptt):
             log("对话方式：一直听")
 
 
-def _ptt_down():
-    """当前是否按住了 PTT 键。"""
+def _ptt_flag_touch():
+    """读 Electron 写的 PTT 标记；有新的按下就返回 True。
+
+    为什么要绕一圈：这台机器不允许 python 进程读键盘状态
+    （GetAsyncKeyState 恒为 0），但 Electron 用 globalShortcut 注册热键是系统级的。
+    所以由 Electron 收键，写一个标记文件，桥这边只读文件。
+    """
+    try:
+        mt = os.path.getmtime(PTT_FLAG)
+    except Exception:
+        return False
     st = _PTT_CTX.get("state") or {}
+    if st.get("flag_mtime") == mt:
+        return False
+    st["flag_mtime"] = mt
+    return True
+
+
+def _ptt_down():
+    """当前是否该收音：Electron 按到键（开了一个收音窗口）或本进程能读到键按住。"""
+    st = _PTT_CTX.get("state") or {}
+    if st.get("open_until", 0.0) > time.monotonic():
+        return True
     return _key_down(st.get("vk", 0))
 
 
@@ -1359,7 +1384,7 @@ def mic_loop(asr, brain, say_it, vad, context, cfg, device_index, stop_event):
     _mic_state = {"fails": 0, "silent_since": 0.0}   # 麦克风自愈：读取失败计数 / 全零起始时间
     _noise = {"v": 0.004}   # 房间底噪（慢速 EMA），用于自适应电平门限
     # 按键说话（PTT）状态：mode = auto / ptt；vk 来自配置里的 ptt_key
-    _ptt = {"mode": "auto", "vk": 0, "was_muted": False, "muted_frames": 0,
+    _ptt = {"mode": "auto", "vk": 0, "was_muted": False, "muted_frames": 0, "open_until": 0.0, "flag_mtime": None,
             "cfg_at": 0.0, "cfg_mtime": None}
     _PTT_CTX["state"] = _ptt
     try:
@@ -1750,6 +1775,10 @@ def mic_loop(asr, brain, say_it, vad, context, cfg, device_index, stop_event):
             # 按键说话（PTT）：不按键时把音频换成静音，
             # 这样 VAD 自然会结束上一句，不用另写一套状态机。
             if _ptt["mode"] == "ptt":
+                # Electron 按到快捷键会写标记文件（python 进程读不到键盘）
+                if _ptt_flag_touch() and not _key_down(_ptt.get("vk", 0)):
+                    _ptt["open_until"] = time.monotonic() + 8.0
+                    log("PTT：收到按键，开始收音")
                 if not _ptt_down():
                     _ptt["muted_frames"] += 1
                     if not _ptt["was_muted"]:
@@ -1783,6 +1812,8 @@ def mic_loop(asr, brain, say_it, vad, context, cfg, device_index, stop_event):
 
             if utt:
                 _auto_state["last_speech"] = time.monotonic()
+                # 这一句说完了：PTT 的收音窗口关闭，等下一次按键
+                _ptt["open_until"] = 0.0
                 if pending:
                     # 上一句刚说完又开口：接在同一句里，避免「我。」「钟。」式碎片。
                     pending["samples"] = np.concatenate([pending["samples"], utt["samples"]])
