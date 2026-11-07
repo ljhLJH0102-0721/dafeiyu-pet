@@ -24,6 +24,7 @@ const { createWindowState } = require('./shell/windowState');
 const pageCommand = require('./shell/pageCommand');
 const settingsStore = require('./shell/settingsStore');
 const settingsApply = require('./shell/settingsApply');
+const { createPluginHost } = require('./shell/plugins');
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
@@ -36,6 +37,20 @@ const AUDIO_DIR =
   'C:\\Users\\Administrator\\Documents\\deepseek-harness\\default-workspace\\dafeiyu-pet\\audio';
 const STATIC_PORT = 5010;
 const API_PORT = 5011;
+
+// ── 插件宿主（创意工坊）────────────────────────────────
+const pluginHost = createPluginHost({
+  dir: path.join(__dirname, 'plugins'),
+  log,
+  getSettings: () => settingsStore.getSettings(),
+  savePlugins: (id, on) => {
+    const s = settingsStore.getSettings();
+    const map = Object.assign({}, s.plugins || {});
+    map[id] = !!on;
+    settingsStore.setSettings({ plugins: map });
+  },
+});
+
 const LOG_PATH = path.join(__dirname, 'pet-shell.log');
 const POS_PATH = path.join(__dirname, 'pet-window.json');
 
@@ -215,7 +230,7 @@ function createWindow() {
   win.webContents.on('console-message', (_e, level, message) => {
     if (level >= 2) log('[page]', message);
   });
-  win.webContents.on('did-finish-load', () => log('page loaded'));
+  win.webContents.on('did-finish-load', () => { log('page loaded'); injectPlugins(); });
 
   // 用户手动拖边缩放 → 交给 geo 对账（拖动中一律忽略，≤2px 抖动忽略）
   let resizeSaveTimer = null;
@@ -295,6 +310,91 @@ function openSettings() {
   settingsWin.on('closed', () => { settingsWin = null; });
 }
 
+
+// ── 创意工坊窗口 ──────────────────────────────────────────
+let workshopWin = null;
+
+function openWorkshop() {
+  if (workshopWin && !workshopWin.isDestroyed()) {
+    workshopWin.show();
+    workshopWin.focus();
+    return;
+  }
+  workshopWin = new BrowserWindow({
+    width: 860,
+    height: 680,
+    minWidth: 720,
+    minHeight: 540,
+    title: '大肥鱼 · 创意工坊',
+    frame: false,
+    transparent: true,
+    backgroundColor: '#00000000',
+    hasShadow: true,
+    roundedCorners: true,
+    resizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    skipTaskbar: false,
+    autoHideMenuBar: true,
+    icon: path.join(__dirname, 'assets', 'icon_256.png'),
+    webPreferences: {
+      preload: path.join(__dirname, 'preload-workshop.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+  workshopWin.loadFile(path.join(__dirname, 'workshop.html'));
+  try { workshopWin.setAlwaysOnTop(true, 'screen-saver'); } catch (e) {}
+  workshopWin.once('ready-to-show', () => {
+    try { workshopWin.show(); workshopWin.focus(); workshopWin.moveTop(); } catch (e) {}
+  });
+  workshopWin.on('closed', () => { workshopWin = null; });
+}
+
+ipcMain.handle('workshop:list', () => {
+  try { pluginHost.scan(); } catch (e) {}
+  return pluginHost.list();
+});
+ipcMain.handle('workshop:rescan', () => {
+  const list = pluginHost.scan();
+  injectPlugins();
+  return list.length;
+});
+ipcMain.handle('workshop:toggle', (_e, d) => {
+  pluginHost.setEnabled(String((d && d.id) || ''), !!(d && d.on));
+  injectPlugins();
+  return { ok: true };
+});
+ipcMain.handle('workshop:openDir', () => {
+  try { require('electron').shell.openPath(pluginHost.baseDir); return { ok: true }; } catch (e) { return { ok: false, error: String(e) }; }
+});
+ipcMain.handle('workshop:template', (_e, d) => {
+  const r = pluginHost.createTemplate((d && d.id) || '');
+  if (r && r.ok) {
+    injectPlugins();
+    try { require('electron').shell.openPath(r.dir); } catch (e) {}
+  }
+  return r;
+});
+ipcMain.on('workshop:close', () => { try { if (workshopWin && !workshopWin.isDestroyed()) workshopWin.close(); } catch (e) {} });
+
+/** 把启用插件的入口 JS 注入页面（每次页面加载 / 插件变更后调用） */
+function injectPlugins() {
+  try {
+    if (!win || win.isDestroyed()) return;
+    const scripts = pluginHost.entryScripts();
+    let chain = Promise.resolve();
+    for (const s of scripts) {
+      chain = chain.then(() => win.webContents.executeJavaScript(
+        '(function(){try{\n' + s.code + '\n}catch(e){console.error("[plugin:' + s.id + ']", e);}return 1;})()',
+        true
+      ).catch((e) => log('[plugin] 注入失败 ' + s.id, String(e))));
+    }
+    chain.then(() => log('[plugins] 已注入 ' + scripts.length + ' 个插件'));
+  } catch (e) {
+    log('[plugins] 注入异常', String(e));
+  }
+}
 // 设置窗口需要的 IPC
 ipcMain.handle('settings:get', () => settingsStore.getSettings());
 ipcMain.handle('settings:set', (_e, patch) => {
@@ -500,6 +600,10 @@ function buildMenuData() {
       { id: 'g-exp', label: '表情', icon: '', chips: EXPRESSIONS.map((n) => ({ id: 'exp:' + n, label: n })) },
       { id: 'g-mot', label: '动作', icon: '', chips: MOTIONS.map((n) => ({ id: 'mot:' + n, label: n })) },
       { sep: true },
+      // 插件贡献的菜单项（创意工坊里装的）
+      ...pluginHost.menuItems(),
+      { id: 'workshop', label: '创意工坊', icon: '🧩' },
+      { sep: true },
       { id: 'settings', label: '设置…', icon: '⚙' },
       { id: 'size-up', label: '大一点', icon: '⤢' },
       { id: 'size-down', label: '小一点', icon: '⤡' },
@@ -522,6 +626,21 @@ function speak(text) {
 }
 
 function handleMenuAction(id) {
+  if (id === 'workshop') {
+    openWorkshop();
+    return;
+  }
+  if (id.startsWith('plugin:')) {
+    // plugin:<插件id>:<动作id>
+    const parts = String(id).split(':');
+    const pid = parts[1] || '';
+    const act = parts.slice(2).join(':') || '';
+    const js = '(function(){ try { return !!window.__runPlugin(' + JSON.stringify(pid) + ', ' + JSON.stringify(act) + '); } catch (e) { return false; } })()';
+    runJs(js)
+      .then((ok) => { if (!ok) log('[plugin] 未处理:', pid, act); })
+      .catch(() => {});
+    return;
+  }
   const fire = (name, args) => cmd(name, args).catch(() => {});
   if (id.startsWith('exp:')) {
     fire('expression', { name: id.slice(4), ms: 3000 });
@@ -1062,6 +1181,17 @@ function startApiServer() {
     // 直接触发一个菜单动作（自动化测试用）
     // 注入一个光标位置（自动化测试「全屏跟随」用；真实运行时由系统光标驱动）
     // GPU / 合成状态（掉帧排查）
+    // 插件状态（调试 / 回归测试用）
+    if (url === '/plugins') {
+      try {
+        return send(200, {
+          ok: true,
+          plugins: pluginHost.list(),
+          menu: pluginHost.menuItems(),
+          dir: pluginHost.baseDir,
+        });
+      } catch (e) { return send(500, { ok: false, error: String(e) }); }
+    }
     if (url === '/debug/gpu') {
       const out = { featureStatus: {}, info: {} };
       try { out.featureStatus = app.getGPUFeatureStatus() || {}; } catch (e) {}
@@ -1394,6 +1524,7 @@ app.whenReady().then(() => {
     startApiServer();
     setupIpc();
     createWindow();
+  try { pluginHost.scan(); } catch (e) { log('[plugins] 启动扫描失败', String(e)); }
     setupTray();
     applyInteractive();
     startHitTestLoop();

@@ -1,0 +1,11 @@
+{
+  "id": "clock",
+  "name": "现在几点了",
+  "version": "0.1.0",
+  "author": "大肥鱼桌宠（示例插件）",
+  "description": "在右键菜单加一项，点一下她用气泡告诉你现在几点。用来演示插件怎么写。",
+  "menu": [
+    { "id": "time", "label": "现在几点了", "icon": "🕒" }
+  ],
+  "entry": "index.js"
+}

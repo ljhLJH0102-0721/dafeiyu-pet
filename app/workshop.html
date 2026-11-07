@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>大肥鱼 · 创意工坊</title>
+<style>
+  :root {
+    --blue: #2f6bff; --blue-deep: #1d4ed8; --blue-soft: #eaf1ff;
+    --ink: #0f172a; --muted: #5b6b84; --line: #e4ebf7; --ok: #12b76a; --warn: #f79009;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; background: transparent; color: var(--ink);
+    font: 14px/1.65 "Microsoft YaHei UI", "Segoe UI", system-ui, sans-serif;
+    user-select: none; overflow: hidden;
+  }
+  .win {
+    position: absolute; inset: 0; display: flex; border-radius: 18px; overflow: hidden;
+    background: linear-gradient(160deg, #f4f8ff 0%, #ffffff 42%, #eef4ff 100%);
+    box-shadow: 0 24px 64px rgba(23, 43, 99, .28), 0 0 0 1px rgba(47, 107, 255, .10);
+  }
+  .side {
+    width: 236px; flex: none; padding: 16px 12px 14px;
+    background: linear-gradient(180deg, rgba(234, 241, 255, .95), rgba(255, 255, 255, .65));
+    border-right: 1px solid var(--line);
+    display: flex; flex-direction: column; gap: 10px;
+  }
+  .brand { display: flex; align-items: center; gap: 9px; padding: 4px 6px 10px; }
+  .brand .logo {
+    width: 34px; height: 34px; border-radius: 11px; display: grid; place-items: center;
+    background: linear-gradient(145deg, #6f9bff, var(--blue)); color: #fff; font-size: 17px;
+  }
+  .brand b { font-size: 14.5px; }
+  .brand small { display: block; color: var(--muted); font-size: 11px; }
+  .btn {
+    width: 100%; text-align: left; padding: 9px 11px; border: 1px solid var(--line);
+    background: #fff; border-radius: 10px; font: inherit; font-size: 13px; cursor: pointer;
+    color: var(--ink); transition: all .15s;
+  }
+  .btn:hover { border-color: #c3d2ea; background: #f8fbff; }
+  .btn.primary { background: linear-gradient(145deg, #6f9bff, var(--blue)); color: #fff; border: 0; font-weight: 600; }
+  .btn.primary:hover { filter: brightness(1.05); }
+  .side .grow { flex: 1; }
+  .side .tip { color: var(--muted); font-size: 11.5px; line-height: 1.6; padding: 0 4px; }
+  .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .head {
+    height: 54px; flex: none; display: flex; align-items: center; gap: 10px;
+    padding: 0 16px; border-bottom: 1px solid var(--line); -webkit-app-region: drag;
+  }
+  .head h1 { font-size: 15px; margin: 0; font-weight: 600; }
+  .head .x {
+    margin-left: auto; width: 30px; height: 30px; border: 0; border-radius: 9px; cursor: pointer;
+    background: transparent; color: var(--muted); font-size: 17px; -webkit-app-region: no-drag;
+  }
+  .head .x:hover { background: #ffe8e8; color: #e5484d; }
+  .body { flex: 1; min-height: 0; overflow-y: auto; padding: 16px; }
+  .body::-webkit-scrollbar { width: 8px; }
+  .body::-webkit-scrollbar-thumb { background: #d5e0f2; border-radius: 6px; }
+  .card { background: #fff; border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; margin-bottom: 12px; }
+  .card h2 { font-size: 13.5px; margin: 0 0 10px; color: var(--blue-deep); }
+  .plug { display: flex; align-items: flex-start; gap: 12px; padding: 11px 0; border-bottom: 1px dashed var(--line); }
+  .plug:last-child { border-bottom: 0; }
+  .plug .ico { width: 34px; height: 34px; border-radius: 10px; background: var(--blue-soft); display: grid; place-items: center; font-size: 17px; flex: none; }
+  .plug .info { flex: 1; min-width: 0; }
+  .plug .name { font-weight: 600; font-size: 13.5px; }
+  .plug .meta { color: var(--muted); font-size: 11.5px; }
+  .plug .desc { color: #4a5b78; font-size: 12.5px; margin-top: 3px; }
+  .plug .err { color: #d92d20; font-size: 11.5px; margin-top: 3px; }
+  .switch { position: relative; display: inline-block; width: 40px; height: 22px; flex: none; }
+  .switch input { display: none; }
+  .switch .track { position: absolute; inset: 0; background: #dbe3f1; border-radius: 999px; transition: background .18s; }
+  .switch .track::after {
+    content: ""; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px;
+    background: #fff; border-radius: 50%; transition: transform .18s; box-shadow: 0 1px 3px rgba(15, 23, 42, .18);
+  }
+  .switch input:checked + .track { background: var(--blue); }
+  .switch input:checked + .track::after { transform: translateX(18px); }
+  pre {
+    background: #0f172a; color: #d7e3ff; border-radius: 10px; padding: 12px 14px;
+    font: 12px/1.7 "Cascadia Mono", Consolas, monospace; overflow-x: auto; margin: 8px 0;
+  }
+  code { background: var(--blue-soft); padding: 1px 5px; border-radius: 5px; font-size: 12px; }
+  .ep { display: flex; gap: 10px; padding: 8px 0; border-bottom: 1px dashed var(--line); font-size: 12.5px; }
+  .ep:last-child { border-bottom: 0; }
+  .ep b { flex: none; width: 92px; color: var(--blue-deep); }
+  .ep span { color: #44546f; }
+  .hint { color: var(--muted); font-size: 12px; }
+  .badge { display: inline-block; padding: 1px 7px; border-radius: 999px; background: var(--blue-soft); color: var(--blue-deep); font-size: 11px; margin-left: 6px; }
+  .badge.off { background: #f1f5f9; color: #64748b; }
+  .badge.bad { background: #fff1f1; color: #d92d20; }
+</style>
+</head>
+<body>
+<div class="win">
+  <div class="side">
+    <div class="brand">
+      <div class="logo">🧩</div>
+      <div><b>创意工坊</b><small>给她的能力加东西</small></div>
+    </div>
+    <button class="btn primary" id="make">＋ 新建插件模板</button>
+    <button class="btn" id="openDir">打开插件目录</button>
+    <button class="btn" id="rescan">重新扫描</button>
+    <div class="grow"></div>
+    <div class="tip">
+      插件放在 <code>pet-shell/plugins/</code> 下，一个文件夹一个插件。<br>
+      改动后点「重新扫描」或重启桌宠即可生效。
+    </div>
+  </div>
+  <div class="main">
+    <div class="head">
+      <h1>创意工坊</h1>
+      <span class="hint" id="count"></span>
+      <button class="x" id="close">×</button>
+    </div>
+    <div class="body">
+      <div class="card">
+        <h2>已安装的插件</h2>
+        <div id="list"></div>
+        <div id="empty" class="hint" style="display:none">还没有插件。点左边「＋ 新建插件模板」会生成一个能跑的示例。</div>
+      </div>
+
+      <div class="card">
+        <h2>她支持哪些扩展点</h2>
+        <div class="ep"><b>右键菜单</b><span>在 <code>plugin.json</code> 的 <code>menu</code> 里写一项，就会出现在右键菜单里（和「打个招呼」同级）。</span></div>
+        <div class="ep"><b>气泡说话</b><span><code>window.petPlugins.bubble('你好', 4)</code> —— 让她头顶冒一句话，不花 token、不发声。</span></div>
+        <div class="ep"><b>表情</b><span><code>window.petPlugins.expression('爱心眼')</code> —— 切表情（名称见右键「表情」里那些）。</span></div>
+        <div class="ep"><b>动作</b><span><code>window.petPlugins.motion('Idle')</code> —— 播一个动作组。</span></div>
+        <div class="ep"><b>情绪反应</b><span><code>window.petPlugins.gesture('happy')</code> —— 触发一次情绪小反应。</span></div>
+        <div class="ep"><b>语音</b><span>写 <code>command.txt</code> 里一行 <code>SAY:台词</code>，她会用她的声音念出来（见文档）。</span></div>
+      </div>
+
+      <div class="card">
+        <h2>五分钟写一个插件</h2>
+        <p class="hint" style="margin:0 0 6px">目录结构：</p>
+        <pre>pet-shell/plugins/clock/
+├─ plugin.json     ← 描述自己
+└─ index.js        ← 页面里执行的代码</pre>
+        <p class="hint" style="margin:0 0 6px">plugin.json：</p>
+        <pre>{
+  "id": "clock",
+  "name": "现在几点了",
+  "version": "0.1.0",
+  "author": "你的名字",
+  "description": "点一下，她用气泡报时间",
+  "menu": [{ "id": "time", "label": "现在几点了", "icon": "🕒" }],
+  "entry": "index.js"
+}</pre>
+        <p class="hint" style="margin:0 0 6px">index.js：</p>
+        <pre>window.petPlugins.register('clock', {
+  action(actionId) {
+    if (actionId === 'time') {
+      const t = new Date().toLocaleTimeString('zh-CN',
+        { hour: '2-digit', minute: '2-digit' });
+      window.petPlugins.bubble('现在 ' + t + ' 啦~', 4);
+      return true;
+    }
+    return false;
+  }
+});</pre>
+        <p class="hint">返回值 <code>true</code> 表示已处理；返回 <code>false</code> 会在日志里记一笔，方便排查。</p>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+  const $ = (id) => document.getElementById(id);
+  const api = window.petWorkshop;
+
+  function render(list) {
+    const box = $('list');
+    box.innerHTML = '';
+    $('empty').style.display = list.length ? 'none' : 'block';
+    $('count').textContent = list.length ? ('共 ' + list.length + ' 个') : '';
+    for (const p of list) {
+      const row = document.createElement('div');
+      row.className = 'plug';
+
+      const ico = document.createElement('div');
+      ico.className = 'ico';
+      ico.textContent = p.error ? '⚠' : '🧩';
+
+      const info = document.createElement('div');
+      info.className = 'info';
+
+      const name = document.createElement('div');
+      name.className = 'name';
+      name.textContent = p.name;
+      const b = document.createElement('span');
+      b.className = 'badge' + (p.error ? ' bad' : p.enabled ? '' : ' off');
+      b.textContent = p.error ? '有错误' : p.enabled ? '已启用' : '已关闭';
+      name.appendChild(b);
+      info.appendChild(name);
+
+      const meta = document.createElement('div');
+      meta.className = 'meta';
+      meta.textContent = [
+        p.version ? 'v' + p.version : '',
+        p.author ? 'by ' + p.author : '',
+        p.menuCount ? p.menuCount + ' 个菜单项' : '无菜单项',
+      ].filter(Boolean).join(' · ');
+      info.appendChild(meta);
+
+      if (p.description) {
+        const d = document.createElement('div');
+        d.className = 'desc';
+        d.textContent = p.description;
+        info.appendChild(d);
+      }
+      if (p.error) {
+        const e = document.createElement('div');
+        e.className = 'err';
+        e.textContent = p.error;
+        info.appendChild(e);
+      }
+
+      const sw = document.createElement('label');
+      sw.className = 'switch';
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.checked = !!p.enabled;
+      cb.disabled = !!p.error;
+      cb.addEventListener('change', async () => {
+        await api.toggle(p.id, cb.checked);
+        b.textContent = cb.checked ? '已启用' : '已关闭';
+        b.className = 'badge' + (cb.checked ? '' : ' off');
+      });
+      const track = document.createElement('span');
+      track.className = 'track';
+      sw.appendChild(cb);
+      sw.appendChild(track);
+
+      row.appendChild(ico);
+      row.appendChild(info);
+      row.appendChild(sw);
+      box.appendChild(row);
+    }
+  }
+
+  async function refresh() {
+    const list = await api.list();
+    render(list || []);
+  }
+
+  $('make').addEventListener('click', async () => {
+    const r = await api.template('');
+    if (r && r.ok) { await refresh(); }
+    else if (r && r.error) { alert(r.error); }
+  });
+  $('openDir').addEventListener('click', () => api.openDir());
+  $('rescan').addEventListener('click', async () => { await api.rescan(); await refresh(); });
+  $('close').addEventListener('click', () => api.close());
+  window.addEventListener('keydown', (e) => { if (e.key === 'Escape') api.close(); });
+
+  refresh();
+</script>
+</body>
+</html>

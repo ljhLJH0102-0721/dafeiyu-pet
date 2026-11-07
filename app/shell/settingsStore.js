@@ -59,6 +59,8 @@ const UI_DEFAULTS = {
   // 对话方式：auto = 一直听；ptt = 按住按键才听
   voiceMode: 'auto',
   pttKey: 'Backquote',       // KeyboardEvent.code；Esc 不允许
+  // 插件（创意工坊）：id → 是否启用
+  plugins: {},
   // 时事新闻推送
   newsEnabled: false,
   newsIntervalMin: 30,
@@ -128,6 +130,8 @@ function getSettings() {
   // 对话方式以语音桥配置为准（它才是真正执行的）
   if (bridge.voice_mode === 'ptt' || bridge.voice_mode === 'auto') ui.voiceMode = bridge.voice_mode;
   if (bridge.ptt_key) ui.pttKey = String(bridge.ptt_key);
+  // 插件启用状态存在 shell 自己的设置里
+  if (ui.plugins && typeof ui.plugins === 'object') { /* 已是对象 */ }
   // 新闻
   if (bridge.news_enabled != null) ui.newsEnabled = !!bridge.news_enabled;
   if (bridge.news_interval_min) ui.newsIntervalMin = Number(bridge.news_interval_min) || 30;
@@ -147,6 +151,9 @@ function setSettings(patch) {
     voiceMode: patch.voiceMode === 'ptt' || patch.voiceMode === 'auto' ? patch.voiceMode : cur.voiceMode,
     // Esc 是保留键（用来关窗口/取消），不允许绑定
     pttKey: patch.pttKey && patch.pttKey !== 'Escape' ? String(patch.pttKey) : cur.pttKey,
+    plugins: (patch.plugins && typeof patch.plugins === 'object')
+      ? Object.assign({}, cur.plugins, patch.plugins)
+      : cur.plugins,
     newsEnabled: patch.newsEnabled != null ? !!patch.newsEnabled : cur.newsEnabled,
     newsIntervalMin: patch.newsIntervalMin != null ? Math.max(5, Number(patch.newsIntervalMin) || 30) : cur.newsIntervalMin,
     newsTopics: Array.isArray(patch.newsTopics) ? patch.newsTopics.map(String) : cur.newsTopics,

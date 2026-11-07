@@ -972,6 +972,48 @@ export function setupInteraction(): void {
     })(),
   });
 
+
+  // ── 插件 API（创意工坊）────────────────────────────────
+  // 第三方插件通过 window.petPlugins.register(id, { action }) 接入；
+  // 右键菜单里的插件项由外壳发 pet:plugin-run 到这里分发。
+  const pluginHandlers = new Map<string, any>();
+  const pluginApi = {
+    apiVersion: 1,
+    register(id: string, handlers: any): boolean {
+      const key = String(id || '').trim();
+      if (!key) return false;
+      pluginHandlers.set(key, handlers || {});
+      return true;
+    },
+    unregister(id: string): void { pluginHandlers.delete(String(id)); },
+    list(): string[] { return Array.from(pluginHandlers.keys()); },
+    // 小工具：插件不用自己去翻内部函数
+    bubble(text: string, seconds = 4): boolean {
+      try { (window as any).__bubble(String(text), seconds); return true; } catch (e) { return false; }
+    },
+    expression(name: string, ms = 2500): boolean {
+      try { (window as any).__expression(String(name)); return true; } catch (e) { return false; }
+    },
+    motion(group: string, no = 0): boolean {
+      try { (window as any).__motion(String(group), no); return true; } catch (e) { return false; }
+    },
+    gesture(kind: string): boolean {
+      try { (window as any).__react(kind); return true; } catch (e) { return false; }
+    },
+  };
+  (window as any).petPlugins = pluginApi;
+  // 外壳调这个入口：__runPlugin('clock', 'time')
+  (window as any).__runPlugin = (id: string, action: string): boolean => {
+    const h = pluginHandlers.get(String(id));
+    if (!h) return false;
+    try {
+      if (typeof h.action === 'function') return h.action(String(action)) !== false;
+      if (typeof h[action] === 'function') return h[action]() !== false;
+      return false;
+    } catch (e) {
+      return false;
+    }
+  };
   // 给主进程用：给定窗口内坐标，判断是否点在角色身上（逐像素 alpha）
   (window as any).__hitTest = (clientX: number, clientY: number): boolean => {
     const on = isOnCharacter(clientX, clientY);
