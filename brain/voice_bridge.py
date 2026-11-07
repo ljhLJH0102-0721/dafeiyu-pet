@@ -508,6 +508,12 @@ def local_plan(text, screen=None):
     if re.match(r"^(?:请|帮我|帮忙)?\s*(?:打开|开启|启动|运行)$", s):
         return {"say": "打开什么？", "actions": []}
 
+    # 互动类：说「打个招呼 / 摸摸头」也本地处理（固定台词，0 token）
+    if re.search(r"打个招呼|打招呼|问个好|问声好", s):
+        return {"say": "主人好呀～想让我做点什么？", "actions": []}
+    if re.search(r"摸摸头|摸头|摸摸你|摸摸她", s):
+        return {"say": "嘿嘿，摸摸头好舒服～", "actions": []}
+
     # 打招呼 / 试探在不在：本地秒回，不走那 10 秒的模型。
     low = s.lower()
     if len(s) <= 8 and any(g in low for g in GREETINGS):
@@ -1545,8 +1551,14 @@ def mic_loop(asr, brain, say_it, vad, context, cfg, device_index, stop_event):
                 if task_like:
                     say_it('好，我去看看。')
                 # 联网：只有问「我本来不知道的事实」时才查（用主人这句话判断，不用整段提示词）
-                prompt_text = context.compose(
-                    command_text, desktop.format_screen(screen) if screen else None)
+                # 屏幕文字只在**需要看屏幕**的时候才带：纯聊天带上它等于白烧几百 token
+                need_screen = bool(re.search(
+                    r'屏幕|看看|看到|看一下|这个|这里|那里|上面|下面|左边|右边|按钮|框|窗口|页面|选中|勾选',
+                    command_text)) or task_like
+                screen_text = desktop.format_screen(screen) if (screen and need_screen) else None
+                if screen_text:
+                    log("带上屏幕文字：%d 字" % len(screen_text))
+                prompt_text = context.compose(command_text, screen_text)
                 try:
                     if PetNet is not None and PetNet.looks_like_info_need(command_text):
                         _city = (load_config().get("weather_city") or None)
@@ -1674,7 +1686,17 @@ def mic_loop(asr, brain, say_it, vad, context, cfg, device_index, stop_event):
                     os.remove(cmd_file)
                     if text:
                         log("收到 command.txt 指令：%r" % text[:120])
-                        if text.startswith("{") or text.startswith("["):
+                        if text.startswith("SAY:"):
+                            # 直接朗读固定台词（不经过大脑，不消耗 token）
+                            # 用途：右键菜单的「打个招呼」「摸摸头」这类互动语音
+                            line = text[4:].strip()
+                            if line:
+                                try:
+                                    say_it(line)
+                                    log("直接朗读：%r" % line[:60])
+                                except Exception as exc:
+                                    log("直接朗读失败：%s" % exc)
+                        elif text.startswith("{") or text.startswith("["):
                             # 直接给动作 JSON，用于精确验证/调试
                             try:
                                 payload = json.loads(text)

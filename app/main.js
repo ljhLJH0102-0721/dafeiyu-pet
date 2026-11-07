@@ -482,6 +482,16 @@ function buildMenuData() {
   };
 }
 
+/** 让她用她的声音说一句话（走语音桥的 SAY: 通道，不经过模型、不花 token） */
+function speak(text) {
+  const line = String(text || '').trim();
+  if (!line) return;
+  try {
+    const p = path.join(settingsStore.PET_DIR, 'command.txt');
+    fs.writeFileSync(p, 'SAY:' + line, 'utf8');
+  } catch (e) { log('[say] 写入失败', String(e)); }
+}
+
 function handleMenuAction(id) {
   const fire = (name, args) => cmd(name, args).catch(() => {});
   if (id.startsWith('exp:')) {
@@ -496,10 +506,12 @@ function handleMenuAction(id) {
     case 'hello':
       fire('bubble', { text: '主人好呀～', seconds: 3 });
       fire('react', { kind: 'happy' });
+      speak('主人好呀～想让我做点什么？');
       break;
     case 'pat':
       fire('expression', { name: '爱心眼', ms: 2500 });
       fire('react', { kind: 'happy' });
+      speak('嘿嘿，摸摸头好舒服～');
       break;
     case 'settings':
       openSettings();
