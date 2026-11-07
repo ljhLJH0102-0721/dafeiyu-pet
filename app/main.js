@@ -575,8 +575,66 @@ function clampMenuPos(x, y, w, h) {
   };
 }
 
+// 漫游模式下"她"在屏幕上的位置 = 窗口 + 画布位移，这里缓存一下画布位移
+let roamShift = { x: 0, y: 0 };
+let menuFollowTimer = null;
+
+function refreshRoamShift() {
+  try {
+    if (!geo.isRoam || !geo.isRoam()) { roamShift = { x: 0, y: 0 }; return; }
+    runJs('(function(){var c=document.querySelector("canvas");return c?(c.style.transform||""):""})()')
+      .then((tf) => {
+        const m = /translate\(\s*(-?[\d.]+)px\s*,\s*(-?[\d.]+)px\s*\)/.exec(String(tf || ''));
+        if (m) roamShift = { x: Math.round(Number(m[1])), y: Math.round(Number(m[2])) };
+      })
+      .catch(() => {});
+  } catch (e) {}
+}
+
+/** 菜单该出现在哪：贴着她（优先右侧，没地方就左侧），并夹在可见桌面内 */
+function menuAnchorPos(w, h) {
+  const b = geo.get();
+  const ox = roamShift.x;
+  const oy = roamShift.y;
+  // 她的"头"在屏幕上的大概位置
+  const headX = b.x + ox + Math.round(b.w * 0.55);
+  const headY = b.y + oy + Math.round(b.h * 0.28);
+  let area = { x: 0, y: 0, width: 1920, height: 1080 };
+  try { area = screen.getDisplayNearestPoint({ x: headX, y: headY }).workArea; } catch (e) {}
+
+  let x = headX + 24;
+  if (x + w > area.x + area.width - 8) x = headX - 24 - w;   // 右边放不下就换左边
+  let y = headY - Math.round(h * 0.18);
+  const pos = clampMenuPos(x, y, w, h);
+  return pos;
+}
+
+function positionMenu(follow) {
+  if (!menuWin || menuWin.isDestroyed()) return;
+  const b = menuWin.getBounds();
+  const pos = menuAnchorPos(b.width || 276, b.height || 420);
+  try {
+    if (follow) menuWin.setPosition(pos.x, pos.y);
+    else menuWin.setPosition(pos.x, pos.y);
+  } catch (e) {}
+}
+
+function startMenuFollow() {
+  stopMenuFollow();
+  refreshRoamShift();
+  menuFollowTimer = setInterval(() => {
+    if (!menuWin || menuWin.isDestroyed() || !menuWin.isVisible()) { stopMenuFollow(); return; }
+    if (!win || win.isDestroyed() || !win.isVisible()) { stopMenuFollow(); return; }
+    refreshRoamShift();
+    positionMenu(true);
+  }, 150);
+}
+
+function stopMenuFollow() {
+  if (menuFollowTimer) { clearInterval(menuFollowTimer); menuFollowTimer = null; }
+}
+
 function openContextMenu() {
-  const pt = screen.getCursorScreenPoint();
   if (!menuWin || menuWin.isDestroyed()) {
     menuWin = new BrowserWindow({
       width: 272,
@@ -597,6 +655,7 @@ function openContextMenu() {
       },
     });
     menuWin.loadFile(path.join(__dirname, 'menu.html'));
+    menuWin.on('hide', () => stopMenuFollow());
     menuWin.on('blur', () => { try { if (menuWin && !menuWin.isDestroyed()) menuWin.hide(); } catch (e) {} });
     menuWin.once('ready-to-show', () => {
       menuWin.webContents.send('menu:items', buildMenuData());
@@ -606,31 +665,10 @@ function openContextMenu() {
     menuWin.webContents.send('menu:items', buildMenuData());
   }
 
-  // 落点：优先鼠标位置；鼠标不在任何屏幕上（或她跑到屏幕外）时，
-  // 退回到她窗口的可见部分附近 —— 保证菜单永远出现在看得见的地方。
-  let anchorX = pt.x;
-  let anchorY = pt.y;
-  try {
-    const b = geo.get();
-    const onScreen = screen.getAllDisplays().some((d) => {
-      const a = d.workArea;
-      return pt.x >= a.x && pt.x < a.x + a.width && pt.y >= a.y && pt.y < a.y + a.height;
-    });
-    if (!onScreen) {
-      // 取她窗口和当前显示器工作区的交集中心
-      const d = screen.getDisplayNearestPoint({ x: b.x, y: b.y }).workArea;
-      const left = Math.max(b.x, d.x);
-      const right = Math.min(b.x + b.w, d.x + d.width);
-      const top = Math.max(b.y, d.y);
-      const bottom = Math.min(b.y + b.h, d.y + d.height);
-      anchorX = right > left ? Math.round((left + right) / 2) : d.x + Math.round(d.width / 2);
-      anchorY = bottom > top ? Math.round((top + bottom) / 2) : d.y + 120;
-    }
-  } catch (e) {}
-
-  const pos = clampMenuPos(anchorX, anchorY, 276, 420);
-  try { menuWin.setPosition(pos.x, pos.y); } catch (e) {}
+  positionMenu(false);
   try { menuWin.show(); menuWin.focus(); menuWin.moveTop(); } catch (e) {}
+  // 跟着她走：她在屏幕上移动时菜单跟着重排（仍夹在可见桌面内）
+  startMenuFollow();
 }
 
 ipcMain.on('menu:act', (_e, id) => {
@@ -649,6 +687,7 @@ ipcMain.on('menu:resize', (_e, size) => {
     // 变高之后重新夹一次，保证整块菜单都在可见桌面内
     const pos = clampMenuPos(b.x, b.y, w, h);
     menuWin.setBounds({ x: pos.x, y: pos.y, width: w, height: h });
+    if (menuWin.isVisible()) positionMenu(true);
   } catch (e) {}
 });
 
