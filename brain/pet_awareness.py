@@ -25,7 +25,9 @@ import time
 import urllib.request
 
 API = "http://127.0.0.1:5011"
-LOG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pet_awareness.log")
+LOGS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
+os.makedirs(LOGS_DIR, exist_ok=True)
+LOG_PATH = os.path.join(LOGS_DIR, "pet_awareness.log")
 
 # 你主要用的窗口（进程名里包含任意一个即可）
 FOCUS_PROCS = ("deepseek harness", "deepseek-harness")

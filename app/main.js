@@ -474,7 +474,6 @@ function buildMenuData() {
       { id: 'settings', label: '设置…', icon: '⚙' },
       { id: 'size-up', label: '大一点', icon: '⤢' },
       { id: 'size-down', label: '小一点', icon: '⤡' },
-      { id: 'roam', label: '全屏漫游', icon: '◱', value: s.roamMode ? '开' : '关', checked: !!s.roamMode },
       { id: 'center', label: '回到屏幕中央', icon: '◎' },
       { sep: true },
       { id: 'hide', label: '隐藏她', icon: '◡' },
@@ -520,10 +519,18 @@ function handleMenuAction(id) {
     }
     case 'center': {
       try {
-        const { wa } = geo.display();
-        const b = geo.get();
-        geo.moveTo(Math.round((wa.width - b.w) / 2), Math.round((wa.height - b.h) / 2));
-      } catch (e) {}
+        const isRoam = !!(geo.isRoam && geo.isRoam());
+        if (isRoam) {
+          // 漫游时窗口铺满屏幕，移动窗口没有意义：要移的是角色本身
+          runJs('window.__setRoamOffset && window.__setRoamOffset(0, 0)').catch(() => {});
+        } else {
+          const area = screen.getPrimaryDisplay().workArea;
+          const b = geo.get();
+          const nx = Math.round(area.x + (area.width - b.w) / 2);
+          const ny = Math.round(area.y + (area.height - b.h) / 2);
+          geo.moveTo(nx, ny);
+        }
+      } catch (e) { log('[menu] center 失败:', String(e)); }
       break;
     }
     case 'hide':
@@ -842,7 +849,7 @@ function syncPttShortcut() {
   try {
     ok = globalShortcut.register(accel, () => {
       try {
-        fs.writeFileSync(path.join(settingsStore.PET_DIR, 'ptt.flag'), String(Date.now()), 'utf8');
+        fs.writeFileSync(path.join(settingsStore.PET_DIR, 'data', 'ptt.flag'), String(Date.now()), 'utf8');
       } catch (e) { log('[ptt] 写标记失败', String(e)); }
       try { cmd('bubble', { text: '我在听…', seconds: 1.6 }).catch(() => {}); } catch (e) {}
     });
@@ -900,6 +907,18 @@ function startApiServer() {
     // 关闭设置窗口（脚本/测试用）
     // 脚本化退出（stop-pet.ps1 用）
     // 在设置窗口里执行 JS（调试 / 自动化测试用）
+    // 直接触发一个菜单动作（自动化测试用）
+    if (url === '/menu/act' && req.method === 'POST') {
+      return body((d) => {
+        try {
+          handleMenuAction(String((d && d.id) || ''));
+          return send(200, { ok: true, id: (d && d.id) || '' });
+        } catch (err) {
+          return send(500, { ok: false, error: String(err) });
+        }
+      });
+    }
+
     if (url === '/settings/eval' && req.method === 'POST') {
       return body((d) => {
         try {

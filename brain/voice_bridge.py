@@ -171,8 +171,17 @@ except Exception:  # pragma: no cover
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
+# 目录整理：日志进 logs/，运行时小文件进 data/（根目录保持干净）
+LOGS_DIR = os.path.join(HERE, "logs")
+DATA_DIR = os.path.join(HERE, "data")
+for _d in (LOGS_DIR, DATA_DIR):
+    try:
+        os.makedirs(_d, exist_ok=True)
+    except Exception:
+        pass
+
 # 大脑端口缓存：发现一次要 8 秒（psutil 枚举 + 逐端口探活），缓存 10 分钟
-BRAIN_PORT_FILE = os.path.join(HERE, "brain_port.txt")
+BRAIN_PORT_FILE = os.path.join(DATA_DIR, "brain_port.txt")
 BRAIN_TTL = 600.0
 
 # 识别语言：默认普通话。粤语解码在乱码时经常误判成"有粤语证据"，
@@ -186,13 +195,13 @@ MODEL_DIR = os.path.join(
     os.path.expanduser("~"), ".dsh", "speech-to-text", "sensevoice", "models", "sensevoice-onnx"
 )
 SOCKET_NAME = "dafeiyu-pet-whale-single-instance"
-LOG_PATH = os.path.join(HERE, "voice_bridge.log")
+LOG_PATH = os.path.join(LOGS_DIR, "voice_bridge.log")
 CFG_PATH = os.path.join(HERE, "voice_bridge.json")
 
 # PTT 标记文件：Electron 那边按到快捷键就写一次，桥这边读到就开始收音。
 # 为什么要这样：这台机器不允许 python 进程读键盘/注入输入（GetAsyncKeyState 恒为 0），
 # 但 Electron 在主进程里用 globalShortcut 注册热键是系统级的，不受那个限制。
-PTT_FLAG = os.path.join(HERE, "ptt.flag")
+PTT_FLAG = os.path.join(DATA_DIR, "ptt.flag")
 PROMPT_TIMEOUT = 45        # 聊天：45 秒足够（模型思考 1~6 秒）
 PROMPT_TIMEOUT_TASK = 180  # 真干活：要调工具跑命令，实测 30~50 秒，给足余量
 SAMPLE_RATE = 16000

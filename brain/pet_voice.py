@@ -26,7 +26,15 @@ import time
 import urllib.request
 
 AUDIO_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "audio")
-CONF_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pet_voice.json")
+HERE = os.path.dirname(os.path.abspath(__file__))
+LOGS_DIR = os.path.join(HERE, "logs")
+DATA_DIR = os.path.join(HERE, "data")
+for _d in (LOGS_DIR, DATA_DIR):
+    try:
+        os.makedirs(_d, exist_ok=True)
+    except Exception:
+        pass
+CONF_PATH = os.path.join(DATA_DIR, "pet_voice.json")
 API = "http://127.0.0.1:5011"
 
 # 默认用「小艺」：8 个中文音色里唯一标 Cartoon 的少女音。
@@ -73,7 +81,7 @@ _lock = threading.Lock()
 def _log_err(msg):
     """把失败原因写文件——桥是隐藏窗口跑的，看不到 stdout。"""
     try:
-        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "pet_voice.log"), "a", encoding="utf-8") as f:
+        with open(os.path.join(LOGS_DIR, "pet_voice.log"), "a", encoding="utf-8") as f:
             f.write("[%s] %s\n" % (time.strftime("%Y-%m-%dT%H:%M:%S"), msg))
     except Exception:
         pass

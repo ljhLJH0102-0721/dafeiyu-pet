@@ -172,6 +172,8 @@ export function setupInteraction(): void {
   } catch (e) {}
 
   function saveRoamOffset(): void {
+    try { window.localStorage.setItem(ROAM_KEY, JSON.stringify(roamOffset)); } catch (e) {}
+  }
 
   /** 归位到画布中央（漫游复位 / 测试用） */
   (window as any).__setRoamOffset = (x: number, y: number) => {
@@ -181,8 +183,6 @@ export function setupInteraction(): void {
     saveRoamOffset();
     return roamOffset;
   };
-    try { window.localStorage.setItem(ROAM_KEY, JSON.stringify(roamOffset)); } catch (e) {}
-  }
 
   try {
     const b0 = bridge();
