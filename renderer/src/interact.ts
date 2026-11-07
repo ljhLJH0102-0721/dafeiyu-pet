@@ -491,10 +491,29 @@ export function setupInteraction(): void {
 
   // ── 每帧：待机动作 + 摆动 + 惊讶衰减 ──────────────────
   const t0 = performance.now();
+  // 帧率统计（掉帧排查用）：每秒算一次，暴露到 __petState
+  let fpsFrames = 0;
+  let fpsAt = performance.now();
+  let fpsValue = 0;
+  let frameMsMax = 0;
+  let frameLast = performance.now();
+
   function tick(): void {
     const now = performance.now();
     const t = (now - t0) / 1000;
     const dt = 1 / 60;
+
+    // ── 帧率统计 ──────────────────────────────────────
+    const gap = now - frameLast;
+    frameLast = now;
+    if (gap > frameMsMax) frameMsMax = gap;
+    fpsFrames++;
+    if (now - fpsAt >= 1000) {
+      fpsValue = Math.round((fpsFrames * 1000) / (now - fpsAt));
+      fpsFrames = 0;
+      fpsAt = now;
+      frameMsMax = 0;
+    }
 
     // 视线平滑跟随
     state.gazeX += (state.targetGazeX - state.gazeX) * 0.18;
@@ -898,6 +917,8 @@ export function setupInteraction(): void {
     lastAlpha: diag.lastAlpha,
     lastXY: diag.lastXY,
     // 视线（调试/测试用）：外壳推光标时这两个值应该跟着变
+    fps: fpsValue,
+    frameMaxMs: Math.round(frameMsMax * 10) / 10,
     gazeX: Math.round(state.gazeX * 100) / 100,
     gazeY: Math.round(state.gazeY * 100) / 100,
     targetGazeX: Math.round(state.targetGazeX * 100) / 100,

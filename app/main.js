@@ -738,6 +738,7 @@ let pendingHit = null;
 let pendingCount = 0;
 let lastCursorSent = { x: -1, y: -1 };   // 上次推给页面的光标位置
 let lastCursorSentAt = 0;
+let cursorPinUntil = 0;   // 测试时钉住光标，别被真实光标覆盖
 let lastTopmostCheck = 0;   // 上次确认置顶的时间
 let lastHitAt = 0;      // 上次命中检测时间（光标静止也要复测）
 let hitToken = 0;       // 丢弃过期的异步结果
@@ -791,7 +792,7 @@ function startHitTestLoop() {
     // 把全屏光标位置推给页面：鼠标移出她的窗口（比如移到头顶上方）后，
     // 页面收不到 mousemove，视线就会"卡住不动"。这里由外壳统一供坐标。
     const nowC = Date.now();
-    if ((p.x !== lastCursorSent.x || p.y !== lastCursorSent.y) && nowC - lastCursorSentAt > 40) {
+    if (Date.now() >= cursorPinUntil && (p.x !== lastCursorSent.x || p.y !== lastCursorSent.y) && nowC - lastCursorSentAt > 40) {
       lastCursorSent = { x: p.x, y: p.y };
       lastCursorSentAt = nowC;
       try { win.webContents.send('pet:cursor', { x: p.x, y: p.y }); } catch (e) {}
@@ -800,8 +801,8 @@ function startHitTestLoop() {
     const moved = p.x !== lastCursor.x || p.y !== lastCursor.y;
     // 关键修复：以前「光标不动就 return」，导致状态永久冻结在"接收鼠标"，
     // 结果是窗口变成一块挡板，她周围的东西全点不了。
-    // 现在即使光标不动，也每 250ms 复测一次。
-    if (!moved && Date.now() - lastHitAt < 250) return;
+    // 现在即使光标不动，也每 700ms 复测一次（readPixels 会打断 GPU 流水线）。
+    if (!moved && Date.now() - lastHitAt < 700) return;
     if (moved) lastCursor = { x: p.x, y: p.y };
     lastHitAt = Date.now();
 
@@ -822,7 +823,7 @@ function startHitTestLoop() {
         // 页面没响应时宁可放行鼠标：挡住整个桌面比点不到她严重得多
         try { applyIgnore(true); } catch (e) {}
       });
-  }, 60);
+  }, 90);
 }
 
 // ── 托盘 ──────────────────────────────────────────────────
@@ -1007,10 +1008,21 @@ function startApiServer() {
     // 在设置窗口里执行 JS（调试 / 自动化测试用）
     // 直接触发一个菜单动作（自动化测试用）
     // 注入一个光标位置（自动化测试「全屏跟随」用；真实运行时由系统光标驱动）
+    // GPU / 合成状态（掉帧排查）
+    if (url === '/debug/gpu') {
+      const out = { featureStatus: {}, info: {} };
+      try { out.featureStatus = app.getGPUFeatureStatus() || {}; } catch (e) {}
+      try {
+        const info = app.getGPUInfo ? app.getGPUInfo('basic') : Promise.resolve({});
+        return Promise.resolve(info).then((i) => { out.info = i && i.gpuDevice ? i.gpuDevice : i; return send(200, out); });
+      } catch (e) { return send(200, out); }
+    }
+
     if (url === '/test/cursor' && req.method === 'POST') {
       return body((d) => {
         try {
           if (!win || win.isDestroyed()) return send(500, { ok: false, error: 'no window' });
+          cursorPinUntil = Date.now() + Number((d && d.pinMs) || 3000);
           win.webContents.send('pet:cursor', { x: Number((d && d.x) || 0), y: Number((d && d.y) || 0) });
           return send(200, { ok: true });
         } catch (err) { return send(500, { ok: false, error: String(err) }); }

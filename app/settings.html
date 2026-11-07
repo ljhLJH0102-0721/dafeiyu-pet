@@ -353,9 +353,19 @@
             <label>全屏漫游</label>
             <label class="switch"><input id="roamMode" type="checkbox" /><span class="track"></span></label>
             <span style="color:#8a99b3;font-size:12px">整屏活动，没有小框</span>
-          </div>
+          </div>          
           <p class="hint" style="margin-left:116px">漫游时窗口铺满屏幕、背景全透明，拖动她移动的是角色本身；
             其余区域照常点击穿透。</p>
+          <div class="row">
+            <label>流畅度</label>
+            <select id="fpsMode" style="max-width:170px">
+              <option value="0">自动（推荐）</option>
+              <option value="60">60 帧</option>
+              <option value="45">45 帧</option>
+              <option value="30">30 帧（省电）</option>
+            </select>
+            <span style="color:#8a99b3;font-size:12px">掉帧选自动；机器吃力选 30</span>
+          </div>
         </div>
       </section>
 
@@ -447,6 +457,7 @@
     $('keyBtn').classList.remove('recording');
     $('keyBtn').textContent = keyLabel(pttKey);
 
+    try { $('fpsMode').value = String(localStorage.getItem('pet.fps') || '0'); } catch (e) {}
     $('newsEnabled').checked = !!s.newsEnabled;
     $('newsInterval').value = String(s.newsIntervalMin || 30);
     chosenTopics = Array.isArray(s.newsTopics) ? s.newsTopics.slice() : [];
@@ -513,6 +524,7 @@
     $('keyRow').classList.toggle('dim', mode !== 'ptt');
     $('keyBtn').textContent = keyLabel(pttKey);
 
+
     $('newsEnabled').checked = !!s.newsEnabled;
     $('newsInterval').value = String(s.newsIntervalMin || 30);
     chosenTopics = Array.isArray(s.newsTopics) ? s.newsTopics.slice() : [];
@@ -543,6 +555,12 @@
       voice: { voiceName: $('voiceName').value },
     };
     const res = await window.petSettings.set(patch);
+    // 流畅度只影响渲染，存在本地就够了（0 = 自动，由实测耗时决定）
+    try {
+      const fv = $('fpsMode').value;
+      if (fv === '0') localStorage.removeItem('pet.fps');
+      else localStorage.setItem('pet.fps', fv);
+    } catch (e) {}
     $('saved').textContent = res && res.ok ? '已保存' : '保存失败';
     $('saved').className = res && res.ok ? 'status' : 'status warn';
     if (res && res.ok) setTimeout(() => window.petSettings.close(), 700);

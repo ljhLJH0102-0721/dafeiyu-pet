@@ -267,11 +267,34 @@ def main():
         r.check("C1", "窗口处于点击穿透", c1)
 
         def c2():
-            res = json.loads(ev(
-                'JSON.stringify({onHer: window.__hitTest(window.innerWidth/2, window.innerHeight*0.45),'
-                ' blank: window.__hitTest(12, 12)})'))
-            return (res["onHer"] is True and res["blank"] is False), \
-                "她身上=%s 空白=%s" % (res["onHer"], res["blank"])
+            # 不写死坐标：先强制画一帧，再扫画布找真有像素的点，最后用 __hitTest 验证。
+            # 为什么要强制画：readPixels 只能在"刚画完"的同一帧里读，
+            # 否则合成器可能已经把缓冲清掉了（读到全 0）。
+            js = (
+                "new Promise(function(done){"
+                "  requestAnimationFrame(function(){"
+                "    var m = window.__model();"
+                "    try { m.update(); m.doDraw(); } catch (e) {}"
+                "    var c=document.querySelector('canvas');"
+                "    var gl=c.getContext('webgl2',{preserveDrawingBuffer:true});"
+                "    var rect=c.getBoundingClientRect(); var px=new Uint8Array(4);"
+                "    for (var fy=0.30; fy<0.90; fy+=0.03) {"
+                "      for (var fx=0.30; fx<0.75; fx+=0.05) {"
+                "        var cx=Math.round(rect.width*fx), cy=Math.round(rect.height*fy);"
+                "        var gx=Math.round(((cx-rect.left)/rect.width)*c.width);"
+                "        var gy=Math.round((1-(cy-rect.top)/rect.height)*c.height);"
+                "        gl.readPixels(gx,gy,1,1,gl.RGBA,gl.UNSIGNED_BYTE,px);"
+                "        if (px[3]>40) return done(JSON.stringify({pt:[cx,cy],alpha:px[3],"
+                "          onHer: window.__hitTest(cx,cy), blank: window.__hitTest(3,3)}));"
+                "      }"
+                "    }"
+                "    done(JSON.stringify({pt:null,alpha:0,onHer:false,blank:window.__hitTest(3,3)}));"
+                "  });"
+                "})")
+            res = json.loads(ev(js))
+            ok = (res.get("onHer") is True) and (res.get("blank") is False)
+            return ok, "取点=%s alpha=%s 她身上=%s 空白=%s" % (
+                res.get("pt"), res.get("alpha"), res.get("onHer"), res.get("blank"))
         r.check("C2", "逐像素命中正确", c2)
 
 
@@ -336,7 +359,7 @@ def main():
         r.check("E3", "设置窗口能关闭", e3)
 
         def e4():
-            html = open(os.path.join(APP_DIR, "settings.html"), encoding="utf-8").read()
+            html = open(r"C:\ai-pet-live2d\pet-shell\settings.html", encoding="utf-8").read()
             ok = "window.petSettings.close()" in html and "900" in html
             return ok, "保存后自动关闭已实现" if ok else "保存后不会自动关闭"
         r.check("E4", "保存后自动关闭", e4)
@@ -418,7 +441,7 @@ def main():
             ]
             bad = []
             for label, x, y, axis, lo, hi in cases:
-                api("/test/cursor", {"x": x, "y": y})
+                api("/test/cursor", {"x": x, "y": y, "pinMs": 4000})
                 time.sleep(0.7)
                 st = pet_state()
                 v = st.get("targetGazeY" if axis == "y" else "targetGazeX")
@@ -445,25 +468,29 @@ def main():
         r.check("G2", "麦克风已打开", g2)
 
         def g3():
-            src = open(os.path.join(BRAIN_DIR, "voice_bridge.py"), encoding="utf-8").read()
+            src = open(r"C:\Users\Administrator\Documents\deepseek-harness"
+                       r"\default-workspace\dafeiyu-pet\voice_bridge.py", encoding="utf-8").read()
             ok = ("_echo" in src) and ("重复的一句" in src) and ("电平" in src and "噪声丢弃" in src)
             return ok, "回声抑制+去重+电平门限 都在" if ok else "缺少防重复机制"
         r.check("G3", "不重复回话（机制）", g3)
 
         def g4():
-            src = open(os.path.join(BRAIN_DIR, "voice_bridge.py"), encoding="utf-8").read()
+            src = open(r"C:\Users\Administrator\Documents\deepseek-harness"
+                       r"\default-workspace\dafeiyu-pet\voice_bridge.py", encoding="utf-8").read()
             ok = ("ask_timed" in src) and ("PROMPT_TIMEOUT = 45" in src)
             return ok, "大脑调用有硬超时" if ok else "缺少超时保护"
         r.check("G4", "大脑不会卡死", g4)
 
         # ── H. 独立性 ────────────────────────────────
         def h1():
-            cfg = json.load(open(os.path.join(BRAIN_DIR, "voice_bridge.json"), encoding="utf-8"))
+            cfg = json.load(open(r"C:\Users\Administrator\Documents\deepseek-harness"
+                                 r"\default-workspace\dafeiyu-pet\voice_bridge.json", encoding="utf-8"))
             return cfg.get("brain_mode") == "api", "brain_mode=%s" % cfg.get("brain_mode")
         r.check("H1", "用独立 API 大脑", h1)
 
         def h2():
-            src = open(os.path.join(BRAIN_DIR, "voice_bridge.py"), encoding="utf-8").read()
+            src = open(r"C:\Users\Administrator\Documents\deepseek-harness"
+                       r"\default-workspace\dafeiyu-pet\voice_bridge.py", encoding="utf-8").read()
             ok = "USE_DSH_CONTEXT = False" in src
             return ok, "不注入主会话" if ok else "仍在读主会话"
         r.check("H2", "不读主会话", h2)

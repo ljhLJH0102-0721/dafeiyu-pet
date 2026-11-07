@@ -151,8 +151,55 @@ export class LAppDelegate {
       gl.enable(gl.BLEND);
       gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
 
+      // ── 自适应帧率 ──────────────────────────────────────
+      // 这个模型的绘制对象有 715 个（遮罩引用 298 个），在集显上一帧要 20+ ms，
+      // 硬跑 60 会被迫丢帧、时间抖动（看起来就是"掉帧"）。
+      // 所以按实测耗时挑一个能稳定维持的目标帧率：慢机器跑 30，快机器跑 60。
+      const wstats = window as any;
+      const nowFrame = performance.now();
+      const fsz = wstats.__frameSched || (wstats.__frameSched = { last: 0, budget: 1000 / 30, avg: 20 });
+      const wait = fsz.budget - (nowFrame - fsz.last);
+      if (wait > 2) {
+        fsz.skipped = (fsz.skipped || 0) + 1;
+        requestAnimationFrame(loop);
+        return;
+      }
+      fsz.last = nowFrame;
+      fsz.rendered = (fsz.rendered || 0) + 1;
+
       // 描画更新
+      const _t0 = performance.now();
       this._view.render();
+      const _drawMs = performance.now() - _t0;
+      // 帧耗时统计（掉帧排查）：暴露到 window.__drawStats
+      {
+        const w = window as any;
+        const s = w.__drawStats || (w.__drawStats = { n: 0, sum: 0, max: 0, last: 0, lastAt: 0, skip: 0 });
+        s.n++;
+        s.sum += _drawMs;
+        if (_drawMs > s.max) s.max = _drawMs;
+        s.last = _drawMs;
+        if (s.n >= 30) {
+          s.avg = Math.round((s.sum / s.n) * 100) / 100;
+          s.sum = 0;
+          s.n = 0;
+          s.max = Math.round(s.max * 100) / 100;
+          // 按实测耗时定目标帧率：>18ms 就锁 30，<10ms 才敢跑 60，中间 45
+          const fsc = (window as any).__frameSched;
+          if (fsc) {
+            fsc.avg = s.avg;
+            // 想手动指定就 localStorage.setItem('pet.fps', '60')
+            const forced = Number(window.localStorage.getItem('pet.fps') || 0);
+            const want = (forced >= 15 && forced <= 144)
+              ? forced
+              : (s.avg > 16 ? 30 : 60);
+            const budget = 1000 / want;
+            // 平滑过渡，避免帧率来回跳
+            fsc.budget = Math.round((fsc.budget * 0.7 + budget * 0.3) * 100) / 100;
+            fsc.target = Math.round(1000 / fsc.budget);
+          }
+        }
+      }
 
       // ループのために再帰呼び出し
       requestAnimationFrame(loop);
@@ -271,8 +318,13 @@ export class LAppDelegate {
    * Resize the canvas to fill the screen.
    */
   private _resizeCanvas(): void {
-    canvas.width = canvas.clientWidth * window.devicePixelRatio;
-    canvas.height = canvas.clientHeight * window.devicePixelRatio;
+    // 渲染分辨率：默认按 DPI 走（保持清晰）。
+    // 降到 1.0 省像素，但实测帧率没变化 —— 瓶颈是绘制调用数不是填充率，
+    // 所以清晰度不能白送。真要降的话 window.PET_RENDER_DPR = 1。
+    const cap = Number((window as any).PET_RENDER_DPR) || 1.25;
+    const dpr = Math.min(window.devicePixelRatio || 1, cap);
+    canvas.width = Math.max(1, Math.round(canvas.clientWidth * dpr));
+    canvas.height = Math.max(1, Math.round(canvas.clientHeight * dpr));
     gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
   }
 
