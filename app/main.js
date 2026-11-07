@@ -685,7 +685,8 @@ ipcMain.on('menu:resize', (_e, size) => {
     if (!menuWin || menuWin.isDestroyed()) return;
     const b = menuWin.getBounds();
     const h = Math.max(160, Math.min(720, Math.round((size && size.h) || 420)));
-    const w = Math.max(240, Math.min(360, Math.round((size && size.w) || 276)));
+    // 宽度写死：菜单内容宽度是「窗口宽度 100%」，量出来再设回去会自我放大（越点越宽）
+    const w = 276;
     // 变高之后重新夹一次，保证整块菜单都在可见桌面内
     const pos = clampMenuPos(b.x, b.y, w, h);
     menuWin.setBounds({ x: pos.x, y: pos.y, width: w, height: h });
