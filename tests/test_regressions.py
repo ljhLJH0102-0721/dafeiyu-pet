@@ -359,7 +359,7 @@ def main():
         r.check("E3", "设置窗口能关闭", e3)
 
         def e4():
-            html = open(r"C:\ai-pet-live2d\pet-shell\settings.html", encoding="utf-8").read()
+            html = open(os.path.join(APP_DIR, "settings.html"), encoding="utf-8").read()
             ok = "window.petSettings.close()" in html and "900" in html
             return ok, "保存后自动关闭已实现" if ok else "保存后不会自动关闭"
         r.check("E4", "保存后自动关闭", e4)
