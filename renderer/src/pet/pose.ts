@@ -38,6 +38,8 @@ export interface PoseInput {
   sleepy: number;
   /** 当前摆动量 */
   swayX: number;
+  /** 扭腰：0 = 平常，1 = 扭到最大（偶尔触发一次，随时间衰减） */
+  twist?: number;
   /** 当前小动作偏移 */
   gesture: GestureOffset | null;
 }
@@ -79,7 +81,7 @@ export function stepSway(
  * 顺序即优先级：待机 → 视线 → 小动作 → 困倦（困倦会覆盖头部的合成结果）。
  */
 export function computePose(input: PoseInput): PoseParams {
-  const { t, gazeX, gazeY, onChar, surprise, sleepy, swayX, gesture } = input;
+  const { t, gazeX, gazeY, onChar, surprise, sleepy, swayX, gesture, twist } = input;
 
   // 待机摆动：鼠标跟着她时幅度小一点
   const idleAmp = onChar ? 0.6 : 1.0;
@@ -163,6 +165,21 @@ export function computePose(input: PoseInput): PoseParams {
   // 蕾丝边：只留最外层两条（参数少、效果一样）
   params['LaceX1'] = Math.sin(t * 0.48 - 0.3) * 0.16;
   params['LaceX3'] = Math.sin(t * 0.48 - 0.9) * 0.16;
+
+  // 偶尔扭一下腰：twist 由 interact.ts 定时触发并衰减
+  const tw = Math.max(0, Math.min(1, Number(twist) || 0));
+  if (tw > 0.001) {
+    const phase = Math.sin(t * 7.5);           // 扭动的节奏（比呼吸快）
+    params['HipAngleY'] = phase * 9.0 * tw;     // 胯部左右扭转
+    params['HipAngleZ'] = Math.sin(t * 7.5 + 0.8) * 5.0 * tw;
+    params['HipAngleX'] = (params['HipAngleX'] || 0) + Math.sin(t * 7.5 + 1.5) * 3.0 * tw;
+    params['SkirtX1'] = (params['SkirtX1'] || 0) + phase * 0.25 * tw;
+    params['SkirtX3'] = (params['SkirtX3'] || 0) - phase * 0.22 * tw;
+    params['SkirtLayerX1'] = (params['SkirtLayerX1'] || 0) + phase * 0.18 * tw;
+    params['SkirtLayerX3'] = (params['SkirtLayerX3'] || 0) - phase * 0.16 * tw;
+    params['ParamAngleZ'] = (params['ParamAngleZ'] || 0) + Math.sin(t * 7.5 - 0.4) * 2.2 * tw;
+    params['ParamBodyAngleX'] = (params['ParamBodyAngleX'] || 0) + phase * 2.6 * tw;
+  }
 
   // 尾巴（Wing*）：轻轻开合，幅度小但能看出来在动
   params['WingOpenClose'] = 0.16 + breathe * 0.20;

@@ -266,8 +266,24 @@ export function setupInteraction(): void {
     gazeY: 0,
     targetGazeX: 0,
     targetGazeY: 0,
+    twist: 0,     // 扭腰强度 0~1，定时触发后自动衰减
     lastMoveAt: performance.now(),
   };
+
+  // ── 偶尔扭一下腰 ──────────────────────────────────
+  // 每 18~35 秒来一次，持续约 1.8 秒后自然消退。
+  // 太勤像抽筋，太稀又看不出来。
+  function scheduleTwist(): void {
+    const delay = 18000 + Math.random() * 17000;
+    window.setTimeout(() => {
+      try {
+        if (!state.dragging && !state.sleepy) state.twist = 1;
+      } catch (e) {}
+      scheduleTwist();
+    }, delay);
+  }
+  scheduleTwist();
+  (window as any).__twist = () => { state.twist = 1; return state.twist; };
 
   // 外壳回传拖动速度，用来算摆动
   if (b.onDrag) {
@@ -526,6 +542,8 @@ export function setupInteraction(): void {
 
     // 惊讶衰减
     state.surprise = Math.max(0, state.surprise - dt * 1.4);
+    // 扭腰衰减（约 1.8 秒走完一轮）
+    if (state.twist > 0) state.twist = Math.max(0, state.twist - dt * 0.55);
 
     // ★ 唯一写模型参数的地方：pose 算好一整帧，这里一次性提交
     const pose = computePose({
@@ -537,6 +555,7 @@ export function setupInteraction(): void {
       sleepy: state.sleepy,
       swayX: swayState.x,
       gesture: gestureOffset(t),
+      twist: state.twist,
     });
     let releaseEyes = false;
     for (const name in pose) {
