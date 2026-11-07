@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>菜单</title>
+<style>
+  :root {
+    --blue: #2f6bff;
+    --blue-deep: #1d4ed8;
+    --ink: #0f172a;
+    --muted: #64748b;
+    --line: #e4ebf7;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: auto; background: transparent; overflow: hidden; }
+  body {
+    font: 13px/1.5 "Microsoft YaHei UI", "Segoe UI", system-ui, sans-serif;
+    color: var(--ink); user-select: none;
+  }
+  .menu {
+    position: relative;
+    padding: 7px;
+    border-radius: 14px;
+    background: linear-gradient(165deg, #ffffff 0%, #f7fbff 55%, #eef4ff 100%);
+    box-shadow: 0 18px 46px rgba(23, 43, 99, .24), 0 0 0 1px rgba(47, 107, 255, .12);
+    display: flex; flex-direction: column; gap: 2px;
+    width: 100%;
+    max-height: 720px;
+    overflow-y: auto;
+  }
+  .menu::-webkit-scrollbar { width: 6px; }
+  .menu::-webkit-scrollbar-thumb { background: #d5e0f2; border-radius: 6px; }
+  .head {
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 9px 8px; margin-bottom: 2px;
+    border-bottom: 1px solid rgba(228, 235, 247, .9);
+  }
+  .head .dot {
+    width: 20px; height: 20px; border-radius: 7px;
+    background: linear-gradient(145deg, #6f9bff, var(--blue));
+    display: grid; place-items: center; color: #fff; font-size: 11px;
+  }
+  .head b { font-size: 12.5px; font-weight: 600; }
+  .head small { margin-left: auto; color: #93a2bd; font-size: 10.5px; }
+
+  .item {
+    display: flex; align-items: center; gap: 9px;
+    padding: 7px 9px; border-radius: 9px; cursor: pointer;
+    color: #334155; transition: background .12s, color .12s;
+  }
+  .item .ico { width: 16px; text-align: center; color: #8aa0c4; font-size: 13px; }
+  .item .label { flex: 1; }
+  .item .val { color: #9aa9c3; font-size: 11.5px; }
+  .item:hover { background: rgba(47, 107, 255, .09); color: var(--blue-deep); }
+  .item:hover .ico { color: var(--blue); }
+  .item.on .val { color: var(--blue); font-weight: 600; }
+  .item.danger:hover { background: #fff1f1; color: #d92d20; }
+  .sep { height: 1px; background: rgba(228, 235, 247, .9); margin: 4px 6px; }
+
+  /* 表情 / 动作的小胶囊 */
+  .chips { display: flex; flex-wrap: wrap; gap: 5px; padding: 2px 9px 7px 34px; }
+  .chip {
+    padding: 3px 9px; border-radius: 999px; font-size: 11.5px; cursor: pointer;
+    background: #f1f6ff; color: #41628f; border: 1px solid #e2ecfb;
+    transition: all .12s; white-space: nowrap;
+  }
+  .chip:hover { background: var(--blue); border-color: var(--blue); color: #fff; }
+</style>
+</head>
+<body>
+<div class="menu" id="menu"></div>
+<script>
+  const $ = (id) => document.getElementById(id);
+
+  function item(it) {
+    const el = document.createElement('div');
+    el.className = 'item' + (it.checked ? ' on' : '') + (it.danger ? ' danger' : '');
+    el.innerHTML =
+      '<span class="ico">' + (it.icon || '') + '</span>' +
+      '<span class="label"></span>' +
+      '<span class="val"></span>';
+    el.querySelector('.label').textContent = it.label;
+    if (it.value) el.querySelector('.val').textContent = it.value;
+    el.addEventListener('click', () => window.petMenu.act(it.id));
+    return el;
+  }
+
+  window.petMenu.onItems((data) => {
+    const root = $('menu');
+    root.innerHTML = '';
+    const head = document.createElement('div');
+    head.className = 'head';
+    head.innerHTML = '<div class="dot">🐳</div><b></b><small></small>';
+    head.querySelector('b').textContent = data.title || '大肥鱼';
+    head.querySelector('small').textContent = data.hint || '';
+    root.appendChild(head);
+    for (const it of data.items) {
+      if (it.sep) {
+        const s = document.createElement('div');
+        s.className = 'sep';
+        root.appendChild(s);
+        continue;
+      }
+      if (it.chips && it.chips.length) {
+        const head = item({ id: it.id, label: it.label, icon: it.icon });
+        head.addEventListener('click', (e) => e.stopPropagation());
+        root.appendChild(head);
+        const box = document.createElement('div');
+        box.className = 'chips';
+        for (const c of it.chips) {
+          const chip = document.createElement('span');
+          chip.className = 'chip';
+          chip.textContent = c.label;
+          chip.addEventListener('click', () => window.petMenu.act(c.id));
+          box.appendChild(chip);
+        }
+        root.appendChild(box);
+        continue;
+      }
+      root.appendChild(item(it));
+    }
+    // 窗口高度自适应内容（等一帧，等布局稳定后再量）
+    const doResize = () => {
+      const box = $('menu').getBoundingClientRect();
+      window.petMenu.resize(Math.ceil(box.height) + 2, Math.ceil(box.width) + 2);
+    };
+    requestAnimationFrame(() => requestAnimationFrame(doResize));
+    setTimeout(doResize, 80);
+  });
+
+  window.addEventListener('keydown', (e) => { if (e.key === 'Escape') window.petMenu.close(); });
+  window.addEventListener('blur', () => window.petMenu.close());
+</script>
+</body>
+</html>

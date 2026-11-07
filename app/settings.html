@@ -5,251 +5,445 @@
 <title>大肥鱼 · 设置</title>
 <style>
   :root {
-    --bg: #11151c;
-    --panel: #171d27;
-    --line: #2a3342;
-    --text: #dfe7f3;
-    --dim: #8b98ad;
-    --accent: #4c8dff;
-    --ok: #3ddc84;
-    --warn: #ffb020;
+    --blue: #2f6bff;
+    --blue-deep: #1d4ed8;
+    --blue-soft: #eaf1ff;
+    --ink: #0f172a;
+    --muted: #5b6b84;
+    --line: #e4ebf7;
+    --card: #ffffff;
+    --ok: #12b76a;
+    --warn: #f79009;
   }
   * { box-sizing: border-box; }
+  html, body { height: 100%; }
   body {
-    margin: 0; background: var(--bg); color: var(--text);
-    font: 14px/1.6 "Microsoft YaHei UI", "Segoe UI", system-ui, sans-serif;
+    margin: 0;
+    background: transparent;
+    color: var(--ink);
+    font: 14px/1.65 "Microsoft YaHei UI", "Segoe UI", system-ui, sans-serif;
     user-select: none;
+    overflow: hidden;
   }
-  header {
-    display: flex; align-items: center; gap: 10px;
-    padding: 14px 18px; border-bottom: 1px solid var(--line);
-    background: var(--panel); position: sticky; top: 0; z-index: 2;
+
+  /* 整窗：圆角 + 蓝白渐变 */
+  .win {
+    position: absolute; inset: 0;
+    display: flex;
+    border-radius: 18px;
+    overflow: hidden;
+    background: linear-gradient(160deg, #f4f8ff 0%, #ffffff 42%, #eef4ff 100%);
+    box-shadow: 0 24px 64px rgba(23, 43, 99, .28), 0 0 0 1px rgba(47, 107, 255, .10);
   }
-  header h1 { font-size: 15px; margin: 0; font-weight: 600; letter-spacing: .5px; }
-  header .sp { flex: 1; }
-  .tabs { display: flex; gap: 6px; }
-  .tab {
-    padding: 6px 14px; border-radius: 8px; cursor: pointer;
-    color: var(--dim); border: 1px solid transparent;
+
+  /* ── 左侧导航 ───────────────────────────────── */
+  .side {
+    width: 188px; flex: none;
+    padding: 18px 12px 14px;
+    background: linear-gradient(180deg, rgba(234, 241, 255, .95), rgba(255, 255, 255, .65));
+    border-right: 1px solid var(--line);
+    display: flex; flex-direction: column;
+    -webkit-app-region: drag;
   }
-  .tab.on { color: #fff; background: #1e2634; border-color: var(--line); }
-  main { padding: 18px; }
+  .brand { display: flex; align-items: center; gap: 9px; padding: 0 8px 16px; }
+  .brand .dot {
+    width: 26px; height: 26px; border-radius: 9px;
+    background: linear-gradient(145deg, #6f9bff, var(--blue));
+    box-shadow: 0 4px 12px rgba(47, 107, 255, .35);
+    display: grid; place-items: center; color: #fff; font-size: 13px;
+  }
+  .brand b { font-size: 14px; letter-spacing: .3px; }
+  .brand small { display: block; font-size: 11px; color: var(--muted); font-weight: 400; }
+
+  .nav { display: flex; flex-direction: column; gap: 4px; -webkit-app-region: no-drag; }
+  .nav button {
+    display: flex; align-items: center; gap: 9px;
+    width: 100%; padding: 9px 11px; border: 0; border-radius: 10px;
+    background: transparent; color: var(--muted); font: inherit; font-size: 13.5px;
+    cursor: pointer; text-align: left; transition: background .15s, color .15s;
+  }
+  .nav button:hover { background: rgba(47, 107, 255, .07); color: var(--ink); }
+  .nav button.on {
+    background: #fff; color: var(--blue-deep); font-weight: 600;
+    box-shadow: 0 2px 10px rgba(23, 43, 99, .08), inset 0 0 0 1px rgba(47, 107, 255, .18);
+  }
+  .nav .ico { width: 16px; text-align: center; opacity: .85; }
+  .side .sp { flex: 1; }
+  .side .ver { padding: 8px; font-size: 11px; color: #93a2bd; -webkit-app-region: no-drag; }
+
+  /* ── 右侧内容 ───────────────────────────────── */
+  .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .head {
+    height: 46px; flex: none; display: flex; align-items: center;
+    padding: 0 10px 0 20px; -webkit-app-region: drag;
+    border-bottom: 1px solid rgba(227, 234, 246, .8);
+  }
+  .head h1 { margin: 0; font-size: 14px; font-weight: 600; letter-spacing: .2px; }
+  .head .sp { flex: 1; }
+  .head .x {
+    width: 30px; height: 30px; border: 0; border-radius: 9px; cursor: pointer;
+    background: transparent; color: #7b8aa6; font-size: 15px; line-height: 1;
+    -webkit-app-region: no-drag; transition: background .15s, color .15s;
+  }
+  .head .x:hover { background: #ffe8e8; color: #e5484d; }
+
+  .body { flex: 1; overflow-y: auto; padding: 16px 20px 8px; }
+  .body::-webkit-scrollbar { width: 8px; }
+  .body::-webkit-scrollbar-thumb { background: #d5e0f2; border-radius: 8px; }
+
   section { display: none; }
-  section.on { display: block; }
+  section.on { display: block; animation: fade .18s ease; }
+  @keyframes fade { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
+
   .card {
-    background: var(--panel); border: 1px solid var(--line);
-    border-radius: 12px; padding: 16px 18px; margin-bottom: 14px;
+    background: var(--card); border: 1px solid var(--line);
+    border-radius: 14px; padding: 16px 18px; margin-bottom: 12px;
+    box-shadow: 0 4px 16px rgba(23, 43, 99, .05);
   }
-  .card h2 { font-size: 13px; margin: 0 0 12px; color: var(--dim); font-weight: 600; }
-  .row { display: flex; align-items: center; gap: 12px; margin: 10px 0; }
-  .row label { width: 132px; color: var(--dim); flex: none; }
+  .card h2 {
+    margin: 0 0 12px; font-size: 12.5px; font-weight: 700; color: var(--blue-deep);
+    letter-spacing: .4px; text-transform: none;
+  }
+  .row { display: flex; align-items: center; gap: 12px; margin: 9px 0; }
+  .row > label { width: 104px; flex: none; color: var(--muted); font-size: 13px; }
   input[type="text"], input[type="password"], select {
-    flex: 1; min-width: 0; padding: 8px 10px; border-radius: 8px;
-    border: 1px solid var(--line); background: #0d1219; color: var(--text);
-    font: inherit; outline: none;
+    flex: 1; min-width: 0; height: 36px; padding: 0 11px;
+    border-radius: 10px; border: 1px solid var(--line);
+    background: #fbfdff; color: var(--ink); font: inherit; font-size: 13px;
+    outline: none; transition: border-color .15s, box-shadow .15s, background .15s;
   }
-  input:focus, select:focus { border-color: var(--accent); }
-  input[type="range"] { flex: 1; }
+  input:focus, select:focus {
+    border-color: var(--blue); background: #fff;
+    box-shadow: 0 0 0 3px rgba(47, 107, 255, .12);
+  }
+  .hint { color: #8a99b3; font-size: 12px; margin: 8px 0 0 116px; line-height: 1.55; }
+  .hint.warn { color: var(--warn); }
+  .hint code { background: #f1f5fd; border-radius: 5px; padding: 1px 5px; font-size: 11.5px; }
+
+  /* 开关 */
   .switch { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; }
   .switch input { display: none; }
   .track {
-    width: 42px; height: 24px; border-radius: 999px; background: #2a3342;
-    position: relative; transition: background .15s;
+    width: 40px; height: 22px; border-radius: 999px; background: #dbe3f1;
+    position: relative; transition: background .18s;
   }
   .track::after {
-    content: ""; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px;
-    border-radius: 50%; background: #8b98ad; transition: transform .15s, background .15s;
+    content: ""; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px;
+    border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(23,43,99,.28);
+    transition: transform .18s;
   }
-  .switch input:checked + .track { background: #1d3a63; }
-  .switch input:checked + .track::after { transform: translateX(18px); background: var(--accent); }
-  .hint { color: var(--dim); font-size: 12px; margin: 6px 0 0 144px; }
-  footer {
-    display: flex; align-items: center; gap: 12px;
-    padding: 12px 18px; border-top: 1px solid var(--line);
-    background: var(--panel); position: sticky; bottom: 0;
+  .switch input:checked + .track { background: linear-gradient(145deg, #6f9bff, var(--blue)); }
+  .switch input:checked + .track::after { transform: translateX(18px); }
+
+  /* 分段控件 */
+  .seg { display: inline-flex; padding: 3px; background: #f1f5fd; border-radius: 11px; gap: 3px; }
+  .seg button {
+    border: 0; background: transparent; color: var(--muted); font: inherit; font-size: 13px;
+    padding: 6px 14px; border-radius: 9px; cursor: pointer; transition: all .15s;
   }
-  button {
-    padding: 8px 16px; border-radius: 8px; border: 1px solid var(--line);
-    background: #1e2634; color: var(--text); font: inherit; cursor: pointer;
+  .seg button.on {
+    background: #fff; color: var(--blue-deep); font-weight: 600;
+    box-shadow: 0 2px 8px rgba(23, 43, 99, .10);
   }
-  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
-  button:hover { filter: brightness(1.1); }
-  .status { color: var(--ok); font-size: 12px; }
-  .status.warn { color: var(--warn); }
-  .btnrow { display: flex; gap: 8px; margin-left: 144px; }
+
+  /* 按键绑定 */
+  .keybind {
+    min-width: 104px; height: 34px; padding: 0 13px; border-radius: 10px;
+    border: 1px dashed #c3d2ea; background: #fbfdff; color: var(--ink);
+    font: inherit; font-size: 13px; cursor: pointer; transition: all .15s;
+  }
+  .keybind:hover { border-color: var(--blue); color: var(--blue-deep); }
+  .keybind.recording {
+    border-style: solid; border-color: var(--blue); color: var(--blue-deep);
+    background: var(--blue-soft); animation: pulse 1s infinite;
+  }
+  @keyframes pulse { 50% { box-shadow: 0 0 0 4px rgba(47, 107, 255, .14); } }
+  .dim { opacity: .45; pointer-events: none; }
+
+  /* 底部按钮 */
+  .foot {
+    flex: none; display: flex; align-items: center; gap: 10px;
+    padding: 12px 20px; border-top: 1px solid rgba(227, 234, 246, .9);
+    background: rgba(255, 255, 255, .72); backdrop-filter: blur(6px);
+  }
+  .foot .status { font-size: 12px; color: var(--ok); }
+  .foot .status.warn { color: var(--warn); }
+  .foot .sp { flex: 1; }
+  button.ghost {
+    height: 36px; padding: 0 16px; border-radius: 10px; cursor: pointer;
+    border: 1px solid var(--line); background: #fff; color: var(--muted);
+    font: inherit; font-size: 13px; transition: all .15s;
+  }
+  button.ghost:hover { border-color: #c3d2ea; color: var(--ink); }
+  button.primary {
+    height: 36px; padding: 0 20px; border-radius: 10px; cursor: pointer; border: 0;
+    background: linear-gradient(145deg, #5b8cff, var(--blue)); color: #fff;
+    font: inherit; font-size: 13px; font-weight: 600; letter-spacing: .3px;
+    box-shadow: 0 6px 18px rgba(47, 107, 255, .32); transition: transform .12s, filter .15s;
+  }
+  button.primary:hover { filter: brightness(1.05); }
+  button.primary:active { transform: translateY(1px); }
+
+  .about-line { color: var(--muted); font-size: 12.5px; line-height: 1.9; margin: 0; }
+  .about-line b { color: var(--ink); }
 </style>
 </head>
 <body>
-<header>
-  <h1>🐳 大肥鱼 · 设置</h1>
-  <div class="sp"></div>
-  <div class="tabs">
-    <div class="tab on" data-tab="brain">大脑 / API</div>
-    <div class="tab" data-tab="look">外观 / 行为</div>
-    <div class="tab" data-tab="about">关于</div>
+<div class="win">
+  <aside class="side">
+    <div class="brand">
+      <div class="dot">🐳</div>
+      <div><b>大肥鱼</b><small>桌面伴侣</small></div>
+    </div>
+    <nav class="nav">
+      <button class="on" data-tab="brain"><span class="ico">◈</span>大脑 / API</button>
+      <button data-tab="voice"><span class="ico">◎</span>语音对话</button>
+      <button data-tab="look"><span class="ico">✦</span>外观 / 行为</button>
+      <button data-tab="about"><span class="ico">ℹ</span>关于</button>
+    </nav>
+    <div class="sp"></div>
+    <div class="ver">v1.0 · 开源</div>
+  </aside>
+
+  <div class="main">
+    <div class="head">
+      <h1>设置</h1>
+      <div class="sp"></div>
+      <button class="x" id="close" title="关闭">✕</button>
+    </div>
+
+    <div class="body">
+      <!-- 大脑 -->
+      <section id="tab-brain" class="on">
+        <div class="card">
+          <h2>模型接口（OpenAI 兼容）</h2>
+          <div class="row">
+            <label>接口地址</label>
+            <input id="base_url" type="text" placeholder="https://api.deepseek.com" />
+          </div>
+          <div class="row">
+            <label>模型名</label>
+            <input id="model" type="text" list="modelList" placeholder="deepseek-flash" />
+            <datalist id="modelList">
+              <option value="deepseek-flash"></option>
+              <option value="deepseek-v4-pro"></option>
+              <option value="glm-4-flash"></option>
+              <option value="glm-4.6"></option>
+              <option value="gpt-4o-mini"></option>
+            </datalist>
+          </div>
+          <p class="hint warn">填 <b>接口的模型 ID</b>，不是界面显示名。DeepSeek 官方是
+            <code>deepseek-flash</code> 和 <code>deepseek-v4-pro</code>。</p>
+          <div class="row">
+            <label>API Key</label>
+            <input id="api_key" type="password" placeholder="留空 = 用环境变量 / DSH 凭证" />
+          </div>
+          <div class="row">
+            <label>Key 环境变量</label>
+            <input id="api_key_env" type="text" placeholder="DEEPSEEK_API_KEY" />
+          </div>
+          <div class="row">
+            <label></label>
+            <button class="ghost" id="test">测试连接</button>
+            <span id="testResult" class="status" style="font-size:12px"></span>
+          </div>
+          <p class="hint">保存后 <b>立即生效</b>（下一句话就用新配置），不用重启语音桥。</p>
+        </div>
+      </section>
+
+      <!-- 语音对话 -->
+      <section id="tab-voice">
+        <div class="card">
+          <h2>对话方式</h2>
+          <div class="row">
+            <label>怎么跟她说话</label>
+            <div class="seg" id="modeSeg">
+              <button data-mode="auto" class="on">一直听</button>
+              <button data-mode="ptt">按键说话</button>
+            </div>
+          </div>
+          <p class="hint" style="margin-left:116px">一直听：随时说话她都能听见（自动断句）。<br />
+            按键说话：按住按键才开始收音，松开就发送，适合旁边有人聊天时用。</p>
+          <div class="row" id="keyRow">
+            <label>按键</label>
+            <button class="keybind" id="keyBtn">`</button>
+            <span style="color:#8a99b3;font-size:12px">点一下，再按你想用的键</span>
+          </div>
+          <p class="hint" style="margin-left:116px">Esc 是保留键（关窗口/取消），不能绑定。</p>
+        </div>
+        <div class="card">
+          <h2>音色</h2>
+          <div class="row">
+            <label>说话声音</label>
+            <select id="voiceName">
+              <option value="zh-CN-XiaoyiNeural">晓伊 · 女，活泼</option>
+              <option value="zh-CN-XiaoxiaoNeural">晓晓 · 女，温柔</option>
+              <option value="zh-CN-YunxiNeural">云希 · 男，阳光</option>
+              <option value="zh-CN-YunyangNeural">云扬 · 男，沉稳</option>
+            </select>
+          </div>
+          <p class="hint" style="margin-left:116px">改音色会重启一次语音桥（约 10 秒）。</p>
+        </div>
+      </section>
+
+      <!-- 外观 / 行为 -->
+      <section id="tab-look">
+        <div class="card">
+          <h2>触摸音效</h2>
+          <div class="row">
+            <label>摸她 / 点她</label>
+            <label class="switch"><input id="touchSound" type="checkbox" /><span class="track"></span></label>
+            <span style="color:#8a99b3;font-size:12px">有轻音效</span>
+          </div>
+          <div class="row">
+            <label>音量</label>
+            <input id="soundVolume" type="range" min="0" max="1" step="0.05" style="flex:1" />
+            <span id="volText" style="width:42px;text-align:right;color:var(--muted);font-size:12px"></span>
+          </div>
+        </div>
+        <div class="card">
+          <h2>窗口</h2>
+          <div class="row">
+            <label>置顶显示</label>
+            <label class="switch"><input id="alwaysOnTop" type="checkbox" /><span class="track"></span></label>
+            <span style="color:#8a99b3;font-size:12px">保证不被别的窗口盖住</span>
+          </div>
+          <div class="row">
+            <label>全屏漫游</label>
+            <label class="switch"><input id="roamMode" type="checkbox" /><span class="track"></span></label>
+            <span style="color:#8a99b3;font-size:12px">整屏活动，没有小框</span>
+          </div>
+          <p class="hint" style="margin-left:116px">漫游时窗口铺满屏幕、背景全透明，拖动她移动的是角色本身；
+            其余区域照常点击穿透。</p>
+        </div>
+      </section>
+
+      <!-- 关于 -->
+      <section id="tab-about">
+        <div class="card">
+          <h2>关于</h2>
+          <p class="about-line">
+            <b>大肥鱼桌宠</b> · 开源桌面软件<br />
+            渲染：Live2D Cubism Web SDK（官方 Sample 改造）<br />
+            外壳：Electron 透明窗口 · 逐像素点击穿透<br />
+            语音：Silero VAD + SenseVoice ASR + edge-tts<br />
+            大脑：直连 OpenAI 兼容接口（可换任意供应商）<br />
+            联网：天气 / 搜索（无 Key 也能用）
+          </p>
+        </div>
+      </section>
+    </div>
+
+    <div class="foot">
+      <span id="saved" class="status"></span>
+      <div class="sp"></div>
+      <button class="ghost" id="cancel">关闭</button>
+      <button class="primary" id="save">保存并应用</button>
+    </div>
   </div>
-</header>
-
-<main>
-  <!-- 大脑 -->
-  <section id="tab-brain" class="on">
-    <div class="card">
-      <h2>模型接口（OpenAI 兼容）</h2>
-      <div class="row">
-        <label>接口地址</label>
-        <input id="base_url" type="text" placeholder="https://api.z.ai/api/coding/paas/v4" />
-      </div>
-      <div class="row">
-        <label>模型名</label>
-        <input id="model" type="text" list="modelList" placeholder="deepseek-flash" />
-        <datalist id="modelList">
-          <option value="deepseek-flash"></option>
-          <option value="deepseek-v4-pro"></option>
-          <option value="glm-4-flash"></option>
-          <option value="glm-4.6"></option>
-          <option value="gpt-4o-mini"></option>
-        </datalist>
-      </div>
-      <p class="hint" style="margin-left:144px;color:#ffb020">
-        注意：这里要填 <b>接口的模型 ID</b>，不是界面上显示的名字。
-        DeepSeek 官方只有 <code>deepseek-flash</code> 和 <code>deepseek-v4-pro</code>。
-      </p>
-      <div class="row">
-        <label>API Key</label>
-        <input id="api_key" type="password" placeholder="留空 = 用环境变量 / DSH 凭证" />
-      </div>
-      <div class="row">
-        <label>Key 环境变量</label>
-        <input id="api_key_env" type="text" placeholder="ZAI_CODING_CN_API_KEY" />
-      </div>
-      <div class="btnrow">
-        <button id="test">测试连接</button>
-        <span id="testResult" class="status"></span>
-      </div>
-      <p class="hint">点「保存并应用」后窗口会自动关闭；<b>接口/模型/Key 立即生效</b>（下一句话就用新配置），
-        改音色才会重启语音桥。</p>
-    </div>
-    <div class="card">
-      <h2>语音</h2>
-      <div class="row">
-        <label>音色</label>
-        <select id="voiceName">
-          <option value="zh-CN-XiaoyiNeural">晓伊（女，活泼）</option>
-          <option value="zh-CN-XiaoxiaoNeural">晓晓（女，温柔）</option>
-          <option value="zh-CN-YunxiNeural">云希（男，阳光）</option>
-          <option value="zh-CN-YunyangNeural">云扬（男，沉稳）</option>
-        </select>
-      </div>
-    </div>
-  </section>
-
-  <!-- 外观 -->
-  <section id="tab-look">
-    <div class="card">
-      <h2>触摸音效</h2>
-      <div class="row">
-        <label>摸她 / 点她有音效</label>
-        <label class="switch">
-          <input id="touchSound" type="checkbox" />
-          <span class="track"></span>
-        </label>
-      </div>
-      <div class="row">
-        <label>音量</label>
-        <input id="soundVolume" type="range" min="0" max="1" step="0.05" />
-        <span id="volText" style="width:42px;text-align:right;color:var(--dim)"></span>
-      </div>
-    </div>
-    <div class="card">
-      <h2>窗口</h2>
-      <div class="row">
-        <label>置顶显示</label>
-        <label class="switch">
-          <input id="alwaysOnTop" type="checkbox" />
-          <span class="track"></span>
-        </label>
-      </div>
-      <div class="row">
-        <label>全屏漫游</label>
-        <label class="switch">
-          <input id="roamMode" type="checkbox" />
-          <span class="track"></span>
-        </label>
-      </div>
-      <p class="hint">全屏漫游：窗口铺满整个屏幕、背景全透明，她可以待在任意位置；
-        拖动她时移动的是角色本身（窗口不动），其余区域照常点击穿透。
-        关掉就回到原来的小窗口。</p>
-    </div>
-  </section>
-
-  <!-- 关于 -->
-  <section id="tab-about">
-    <div class="card">
-      <h2>关于</h2>
-      <p style="color:var(--dim);margin:0">
-        大肥鱼桌宠 · 开源桌面软件<br />
-        渲染：Live2D Cubism Web SDK（官方 Sample 改造）<br />
-        外壳：Electron 透明窗口<br />
-        语音：Silero VAD + SenseVoice ASR + edge-tts<br />
-        大脑：直连 OpenAI 兼容接口（可换任意供应商）
-      </p>
-    </div>
-  </section>
-</main>
-
-<footer>
-  <span id="saved" class="status"></span>
-  <div style="flex:1"></div>
-  <button id="cancel">关闭</button>
-  <button id="save" class="primary">保存并应用</button>
-</footer>
+</div>
 
 <script>
   const $ = (id) => document.getElementById(id);
+  const KEY_NAMES = {
+    Backquote: '`', Minus: '-', Equal: '=', BracketLeft: '[', BracketRight: ']',
+    Backslash: '\\', Semicolon: ';', Quote: "'", Comma: ',', Period: '.', Slash: '/',
+    Space: '空格', Tab: 'Tab', CapsLock: 'Caps',
+  };
 
-  document.querySelectorAll('.tab').forEach((t) => {
-    t.addEventListener('click', () => {
-      document.querySelectorAll('.tab').forEach((x) => x.classList.remove('on'));
+  let mode = 'auto';
+  let pttKey = 'Backquote';
+  let recording = false;
+
+  function keyLabel(code) {
+    if (!code) return '未设置';
+    if (KEY_NAMES[code]) return KEY_NAMES[code];
+    if (/^Key[A-Z]$/.test(code)) return code.slice(3);
+    if (/^Digit\d$/.test(code)) return code.slice(5);
+    if (/^Numpad\d$/.test(code)) return '小键盘' + code.slice(6);
+    if (/^F\d{1,2}$/.test(code)) return code;
+    return code;
+  }
+
+  // 标签页
+  document.querySelectorAll('.nav button').forEach((b) => {
+    b.addEventListener('click', () => {
+      document.querySelectorAll('.nav button').forEach((x) => x.classList.remove('on'));
       document.querySelectorAll('section').forEach((x) => x.classList.remove('on'));
-      t.classList.add('on');
-      $('tab-' + t.dataset.tab).classList.add('on');
+      b.classList.add('on');
+      $('tab-' + b.dataset.tab).classList.add('on');
     });
   });
 
-  function fill(s) {
-    $('base_url').value = s.llm.base_url || '';
-    $('model').value = s.llm.model || '';
-    $('api_key').value = s.llm.api_key || '';
-    $('api_key_env').value = s.llm.api_key_env || '';
-    $('touchSound').checked = !!s.touchSound;
-    $('soundVolume').value = s.soundVolume;
-    $('volText').textContent = Math.round(s.soundVolume * 100) + '%';
-    $('alwaysOnTop').checked = !!s.alwaysOnTop;
-    $('roamMode').checked = !!s.roamMode;
-    if (s.voice && s.voice.voiceName) $('voiceName').value = s.voice.voiceName;
-  }
+  // 对话方式
+  document.querySelectorAll('#modeSeg button').forEach((b) => {
+    b.addEventListener('click', () => {
+      mode = b.dataset.mode;
+      document.querySelectorAll('#modeSeg button').forEach((x) => x.classList.toggle('on', x === b));
+      $('keyRow').classList.toggle('dim', mode !== 'ptt');
+    });
+  });
+
+  // 按键录制
+  $('keyBtn').addEventListener('click', (e) => {
+    e.stopPropagation();
+    recording = true;
+    $('keyBtn').classList.add('recording');
+    $('keyBtn').textContent = '按下按键…';
+  });
+  window.addEventListener('keydown', (e) => {
+    if (!recording) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.code === 'Escape') {           // 保留键，不允许
+      recording = false;
+      $('keyBtn').classList.remove('recording');
+      $('keyBtn').textContent = keyLabel(pttKey);
+      return;
+    }
+    pttKey = e.code;
+    recording = false;
+    $('keyBtn').classList.remove('recording');
+    $('keyBtn').textContent = keyLabel(pttKey);
+  });
 
   $('soundVolume').addEventListener('input', (e) => {
     $('volText').textContent = Math.round(e.target.value * 100) + '%';
   });
 
-  // 把「界面上显示的名字」纠正成真正的模型 ID（最常见的坑）
   function normalizeModel(base, model) {
-    var m = String(model || '').trim().replace(/\s+/g, ' ');
-    var lower = m.toLowerCase();
+    let m = String(model || '').trim().replace(/\s+/g, ' ');
+    const lower = m.toLowerCase();
     if (/api\.deepseek\.com/.test(base)) {
       if (/pro/.test(lower)) return 'deepseek-v4-pro';
       if (/flash|v4/.test(lower)) return 'deepseek-flash';
       if (!m) return 'deepseek-flash';
     }
-    // 去掉常见前缀，避免整段显示名被塞进来
     m = m.replace(/^deepseek[- _]?/i, '');
     return m;
   }
 
+  function fill(s) {
+    $('base_url').value = (s.llm && s.llm.base_url) || '';
+    $('model').value = (s.llm && s.llm.model) || '';
+    $('api_key').value = (s.llm && s.llm.api_key) || '';
+    $('api_key_env').value = (s.llm && s.llm.api_key_env) || '';
+    $('touchSound').checked = !!s.touchSound;
+    $('soundVolume').value = s.soundVolume != null ? s.soundVolume : 0.5;
+    $('volText').textContent = Math.round(($('soundVolume').value || 0) * 100) + '%';
+    $('alwaysOnTop').checked = !!s.alwaysOnTop;
+    $('roamMode').checked = !!s.roamMode;
+    if (s.voice && s.voice.voiceName) $('voiceName').value = s.voice.voiceName;
+
+    mode = s.voiceMode === 'ptt' ? 'ptt' : 'auto';
+    pttKey = s.pttKey || 'Backquote';
+    document.querySelectorAll('#modeSeg button').forEach((x) => x.classList.toggle('on', x.dataset.mode === mode));
+    $('keyRow').classList.toggle('dim', mode !== 'ptt');
+    $('keyBtn').textContent = keyLabel(pttKey);
+  }
+
   async function load() {
-    const s = await window.petSettings.get();
-    fill(s);
+    try { fill(await window.petSettings.get()); } catch (e) {}
   }
 
   $('save').addEventListener('click', async () => {
@@ -264,20 +458,19 @@
       soundVolume: Number($('soundVolume').value),
       alwaysOnTop: $('alwaysOnTop').checked,
       roamMode: $('roamMode').checked,
+      voiceMode: mode,
+      pttKey: pttKey,
       voice: { voiceName: $('voiceName').value },
     };
     const res = await window.petSettings.set(patch);
-    $('saved').textContent = res && res.ok ? '已保存，正在应用…' : '保存失败';
+    $('saved').textContent = res && res.ok ? '已保存' : '保存失败';
     $('saved').className = res && res.ok ? 'status' : 'status warn';
-    if (res && res.ok) {
-      // 保存成功就自动关掉设置窗口：省得用户还要再点一次「关闭」
-      setTimeout(() => window.petSettings.close(), 900);
-    } else {
-      setTimeout(() => { $('saved').textContent = ''; }, 4000);
-    }
+    if (res && res.ok) setTimeout(() => window.petSettings.close(), 700);
   });
 
   $('cancel').addEventListener('click', () => window.petSettings.close());
+  $('close').addEventListener('click', () => window.petSettings.close());
+  window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !recording) window.petSettings.close(); });
 
   $('test').addEventListener('click', async () => {
     $('testResult').textContent = '测试中…';
@@ -288,7 +481,7 @@
       api_key: $('api_key').value.trim(),
       api_key_env: $('api_key_env').value.trim(),
     });
-    $('testResult').textContent = r.ok ? ('连接正常（' + r.ms + ' ms）' + (r.reply ? '：' + r.reply : '')) : ('失败：' + r.error);
+    $('testResult').textContent = r.ok ? ('连接正常 · ' + r.ms + ' ms') : ('失败：' + r.error);
     $('testResult').className = r.ok ? 'status' : 'status warn';
   });
 

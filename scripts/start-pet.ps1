@@ -68,8 +68,7 @@ function Resolve-Electron {
 # ── 找语音桥的 python ───────────────────────────────────
 function Resolve-Python {
   $cands = @(
-    (Join-Path $brainDir '.venv\Scripts\pythonw.exe'),
-    (Join-Path $brainDir '.venv\Scripts\python.exe')
+    (Join-Path $brainDir '.venv\Scripts\pythonw.exe')
   )
   foreach ($c in $cands) { if (Test-Path $c) { return $c } }
   return $null
@@ -149,7 +148,6 @@ if ($NoVoice) {
     Start-Sleep -Seconds 4
     if (Test-BridgeRunning) { Ok '语音桥起来了' } else { Warn '语音桥没起来，看看 brain\voice_bridge.log' }
   }
-}
 }
 
 Write-Host ''

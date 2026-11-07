@@ -188,6 +188,7 @@ function createWindow() {
     show: false,                // 先不显示，等页面就绪再 showInactive（不抢焦点）
     backgroundColor: '#00000000',
     webPreferences: {
+      icon: path.join(__dirname, 'assets', 'icon_256.png'),
       preload: path.join(__dirname, 'preload.js'),
       backgroundThrottling: false,
       contextIsolation: true,
@@ -238,13 +239,19 @@ function openSettings() {
     return;
   }
   settingsWin = new BrowserWindow({
-    width: 720,
-    height: 700,
-    minWidth: 640,
-    minHeight: 560,
+    width: 760,
+    height: 620,
+    minWidth: 700,
+    minHeight: 540,
     title: '大肥鱼 · 设置',
-    backgroundColor: '#11151c',
+    frame: false,                 // 自绘标题栏：圆角 + 蓝白，且能用 CSS 做拖动区
+    transparent: true,
+    backgroundColor: '#00000000',
+    hasShadow: true,
+    roundedCorners: true,
+    resizable: true,
     autoHideMenuBar: true,
+    icon: path.join(__dirname, 'assets', 'icon_256.png'),
     webPreferences: {
       preload: path.join(__dirname, 'preload-settings.js'),
       contextIsolation: true,
@@ -252,11 +259,9 @@ function openSettings() {
     },
   });
   log('[settings] 创建窗口');
-  // 她自己是置顶窗口（screen-saver 层），设置窗口必须更高一层，否则会被压在后面
   settingsWin.loadFile(path.join(__dirname, 'settings.html'));
   try { settingsWin.setAlwaysOnTop(true, 'screen-saver'); } catch (e) {}
   settingsWin.webContents.on('did-fail-load', (_e, code, desc) => log('[settings] 加载失败', code, desc));
-  settingsWin.on('closed', () => log('[settings] 窗口已关闭'));
   settingsWin.once('ready-to-show', () => {
     try { settingsWin.show(); settingsWin.focus(); settingsWin.moveTop(); } catch (e) {}
   });
@@ -446,17 +451,151 @@ function setupIpc() {
       { type: 'separator' },
       { label: '退出', click: () => { app.quit(); } },
     ]);
-    // 她的窗口是 focusable:false（不抢键盘焦点）。
-    // 原生菜单挂在不可聚焦的窗口上时，点别处**收不到消失事件**，菜单会一直杵着。
-    // 所以弹菜单期间临时允许聚焦，关掉再恢复。
-    let wasFocusable = true;
-    try { wasFocusable = win.isFocusable(); win.setFocusable(true); win.focus(); } catch (e) {}
-    const restore = () => {
-      try { if (!wasFocusable) win.setFocusable(false); } catch (e) {}
-    };
-    menu.once('menu-will-close', restore);
-    menu.popup({ window: win, callback: restore });
+    // 自绘菜单接管右键（原生菜单保留为兜底，不再弹出）
+    openContextMenu();
   });
+// ── 自绘右键菜单（蓝白圆角，跟着鼠标弹） ──────────────────
+const EXPRESSIONS = ['脸红', '爱心眼', '＞＜', '兔牙', '屑屑眼', '圈圈眼', '黑脸', '流泪', '流冷汗'];
+const MOTIONS = ['举手', '放手', '竖手指开', '竖手指关', '狗尾草开', '狗尾草关'];
+
+function buildMenuData() {
+  const s = settingsStore.getSettings();
+  return {
+    title: '大肥鱼',
+    hint: s.voiceMode === 'ptt' ? '按键说话' : '一直听',
+    items: [
+      { id: 'hello', label: '打个招呼', icon: '👋' },
+      { id: 'pat', label: '摸摸头', icon: '♡' },
+      { sep: true },
+      { id: 'g-exp', label: '表情', icon: '', chips: EXPRESSIONS.map((n) => ({ id: 'exp:' + n, label: n })) },
+      { id: 'g-mot', label: '动作', icon: '', chips: MOTIONS.map((n) => ({ id: 'mot:' + n, label: n })) },
+      { sep: true },
+      { id: 'settings', label: '设置…', icon: '⚙' },
+      { id: 'size-up', label: '大一点', icon: '⤢' },
+      { id: 'size-down', label: '小一点', icon: '⤡' },
+      { id: 'roam', label: '全屏漫游', icon: '◱', value: s.roamMode ? '开' : '关', checked: !!s.roamMode },
+      { id: 'center', label: '回到屏幕中央', icon: '◎' },
+      { sep: true },
+      { id: 'hide', label: '隐藏她', icon: '◡' },
+      { id: 'quit', label: '退出', icon: '×', danger: true },
+    ],
+  };
+}
+
+function handleMenuAction(id) {
+  const fire = (name, args) => cmd(name, args).catch(() => {});
+  if (id.startsWith('exp:')) {
+    fire('expression', { name: id.slice(4), ms: 3000 });
+    return;
+  }
+  if (id.startsWith('mot:')) {
+    fire('motion', { group: id.slice(4), no: 0 });
+    return;
+  }
+  switch (id) {
+    case 'hello':
+      fire('bubble', { text: '主人好呀～', seconds: 3 });
+      fire('react', { kind: 'happy' });
+      break;
+    case 'pat':
+      fire('expression', { name: '爱心眼', ms: 2500 });
+      fire('react', { kind: 'happy' });
+      break;
+    case 'settings':
+      openSettings();
+      break;
+    case 'size-up':
+      applySize(geo.get().w * 1.15, geo.get().h * 1.15);
+      break;
+    case 'size-down':
+      applySize(geo.get().w / 1.15, geo.get().h / 1.15);
+      break;
+    case 'roam': {
+      const s = settingsStore.getSettings();
+      const next = settingsStore.setSettings({ roamMode: !s.roamMode });
+      settingsApply.apply(win, next, log, { setRoam: (on) => { try { geo.setRoam(on); } catch (e) {} } });
+      break;
+    }
+    case 'center': {
+      try {
+        const { wa } = geo.display();
+        const b = geo.get();
+        geo.moveTo(Math.round((wa.width - b.w) / 2), Math.round((wa.height - b.h) / 2));
+      } catch (e) {}
+      break;
+    }
+    case 'hide':
+      try { win.hide(); } catch (e) {}
+      break;
+    case 'quit':
+      app.quit();
+      break;
+  }
+}
+
+let menuWin = null;
+function openContextMenu() {
+  const pt = screen.getCursorScreenPoint();
+  if (!menuWin || menuWin.isDestroyed()) {
+    menuWin = new BrowserWindow({
+      width: 272,
+      height: 420,
+      frame: false,
+      transparent: true,
+      resizable: false,
+      movable: false,
+      skipTaskbar: true,
+      alwaysOnTop: true,
+      show: false,
+      hasShadow: false,
+      icon: path.join(__dirname, 'assets', 'icon_256.png'),
+      webPreferences: {
+        preload: path.join(__dirname, 'preload-menu.js'),
+        contextIsolation: true,
+        nodeIntegration: false,
+      },
+    });
+    menuWin.loadFile(path.join(__dirname, 'menu.html'));
+    menuWin.on('blur', () => { try { if (menuWin && !menuWin.isDestroyed()) menuWin.hide(); } catch (e) {} });
+    menuWin.once('ready-to-show', () => {
+      menuWin.webContents.send('menu:items', buildMenuData());
+      menuWin.show();
+    });
+  } else {
+    menuWin.webContents.send('menu:items', buildMenuData());
+  }
+  // 贴边回拉：别让菜单跑到屏幕外面
+  let wa = { x: 0, y: 0, width: 1920, height: 1080 };
+  try { wa = geo.display().wa; } catch (e) {}
+  const w = 276;
+  const x = Math.min(pt.x, wa.x + wa.width - w - 16);
+  const y = Math.min(pt.y, wa.y + wa.height - 200);
+  try { menuWin.setPosition(Math.max(wa.x + 8, x), Math.max(wa.y + 8, y)); } catch (e) {}
+  try { menuWin.show(); menuWin.focus(); menuWin.moveTop(); } catch (e) {}
+}
+
+ipcMain.on('menu:act', (_e, id) => {
+  try { if (menuWin && !menuWin.isDestroyed()) menuWin.hide(); } catch (e) {}
+  try { handleMenuAction(String(id || '')); } catch (e) { log('[menu] 动作失败', String(e)); }
+});
+ipcMain.on('menu:close', () => {
+  try { if (menuWin && !menuWin.isDestroyed()) menuWin.hide(); } catch (e) {}
+});
+ipcMain.on('menu:resize', (_e, size) => {
+  try {
+    if (!menuWin || menuWin.isDestroyed()) return;
+    const b = menuWin.getBounds();
+    const h = Math.max(160, Math.min(720, Math.round((size && size.h) || 420)));
+    const w = Math.max(240, Math.min(360, Math.round((size && size.w) || 276)));
+    let wa = { x: 0, y: 0, width: 1920, height: 1080 };
+    try { wa = geo.display().wa; } catch (e) {}
+    // 变高之后不能超出屏幕底部
+    const y = Math.min(b.y, wa.y + wa.height - h - 8);
+    const x = Math.min(b.x, wa.x + wa.width - w - 8);
+    menuWin.setBounds({ x, y, width: w, height: h });
+  } catch (e) {}
+});
+
 // ── 几何看门狗 ────────────────────────────────────────────
 // 两个职责：
 //   1. drag.active 卡死时强制结束（丢了 mouseup / 合成事件 / 焦点丢失）
@@ -474,6 +613,17 @@ function startGeometryWatchdog() {
       try { win.webContents.send('pet:drag-info', { vx: 0, vy: 0 }); } catch (e) {}
     }
     try { geo.ensureRoamBounds(); } catch (e) {}
+    // 置顶守护：别的程序（老桌宠、全屏应用）抢到顶层后，她的窗口会"消失"
+    if (Date.now() - lastTopmostCheck > 5000) {
+      lastTopmostCheck = Date.now();
+      try {
+        const wantTop = !!(settingsStore.getSettings().alwaysOnTop);
+        if (wantTop && !win.isAlwaysOnTop()) {
+          win.setAlwaysOnTop(true, 'screen-saver');
+          log('[geo] 置顶被抢，已重新置顶');
+        }
+      } catch (e) {}
+    }
     const r = geo.assertConsistent(win.getBounds(), { dragging: drag.active });
     if (!r.ok && r.reason === 'healed') {
       try { savePos(); } catch (e) {}
@@ -491,6 +641,7 @@ let ignoringNow = true;
 let lastIgnoreChange = 0;
 let pendingHit = null;
 let pendingCount = 0;
+let lastTopmostCheck = 0;   // 上次确认置顶的时间
 let lastHitAt = 0;      // 上次命中检测时间（光标静止也要复测）
 let hitToken = 0;       // 丢弃过期的异步结果
 let skipUntil = 0;              // 窗口正在改尺寸的这段时间不做命中检测
@@ -657,9 +808,13 @@ function refreshTrayMenu() {
 }
 
 function setupTray() {
-  const icon = nativeImage.createFromDataURL(
-    'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAWklEQVR42mNgGAWjYBSMgv8MDAz/8WAOGAWjYBSMglEwCkbBKBgFo2AUjIJRMApGwSgYBaNgFIyCUTAKRsEoGAWjYBSMglEwCkbBKBgFo2AUjIJRMApGwSgYBQAAtQAB0n1l0wAAAABJRU5ErkJggg=='
-  );
+  // 托盘图标：优先用 assets 里的新图标（她的脸），取不到再退回内嵌的 dataURL
+  let icon = nativeImage.createFromPath(path.join(__dirname, 'assets', 'icon_256.png'));
+  if (icon.isEmpty()) {
+    icon = nativeImage.createFromDataURL(
+      'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
+    );
+  }
   try {
     tray = new Tray(icon.isEmpty() ? nativeImage.createEmpty() : icon);
   } catch (e) {
@@ -700,6 +855,20 @@ function startApiServer() {
     // 应用设置（JSON 补丁）：界面和脚本都走这里
     // 关闭设置窗口（脚本/测试用）
     // 脚本化退出（stop-pet.ps1 用）
+    // 在设置窗口里执行 JS（调试 / 自动化测试用）
+    if (url === '/settings/eval' && req.method === 'POST') {
+      return body((d) => {
+        try {
+          if (!settingsWin || settingsWin.isDestroyed()) return send(500, { ok: false, error: 'no settings window' });
+          settingsWin.webContents.executeJavaScript(String((d && d.js) || 'null'), true)
+            .then((result) => send(200, { ok: true, result: result === undefined ? null : result }))
+            .catch((err) => send(500, { ok: false, error: String(err) }));
+        } catch (err) {
+          return send(500, { ok: false, error: String(err) });
+        }
+      });
+    }
+
     if (url === '/quit' && req.method === 'POST') {
       send(200, { ok: true, quitting: true });
       setTimeout(() => { try { app.quit(); } catch (e) {} }, 150);

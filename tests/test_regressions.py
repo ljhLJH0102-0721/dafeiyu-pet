@@ -21,23 +21,15 @@ test_regressions.py — 把所有"反复出现过"的 bug 写成断言，逐个�
 
 import ctypes
 import json
-import os
 import sys
 import time
 import urllib.error
 import urllib.request
 
-
-# 仓库布局：tests/ 的上一级就是仓库根；也可用 PET_DIR 指定语音目录
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-APP_DIR = os.path.join(ROOT, "app")
-BRAIN_DIR = os.environ.get("PET_DIR") or os.path.join(ROOT, "brain")
+BASE = "http://127.0.0.1:5011"
 SHELL_LOG = os.path.join(APP_DIR, "pet-shell.log")
-BRIDGE_LOG = os.path.join(BRAIN_DIR, "voice_bridge.log")
 MAIN_JS = os.path.join(APP_DIR, "main.js")
-SETTINGS_HTML = os.path.join(APP_DIR, "settings.html")
-BRIDGE_PY = os.path.join(BRAIN_DIR, "voice_bridge.py")
-BRIDGE_CFG = os.path.join(BRAIN_DIR, "voice_bridge.json")
+BRIDGE_LOG = os.path.join(BRAIN_DIR, "voice_bridge.log")
 
 user32 = ctypes.windll.user32
 
@@ -311,10 +303,15 @@ def main():
 
         # ── D. 右键菜单 ────────────────────────────────
         def d1():
-            # 菜单本身无法自动点，但"弹菜单时临时可聚焦、关闭后恢复"这层要存在
+            """右键菜单是自绘窗口：必须有点别处就关、以及关闭入口。"""
             src = open(MAIN_JS, encoding="utf-8").read()
-            ok = ("setFocusable(true)" in src) and ("menu-will-close" in src) and ("callback: restore" in src)
-            return ok, "focusable 切换已就位" if ok else "缺少菜单关闭逻辑"
+            ok = (
+                "openContextMenu" in src
+                and "menuWin.on('blur'" in src
+                and "ipcMain.on('menu:close'" in src
+                and "preload-menu.js" in src
+            )
+            return ok, "自绘菜单 + blur 关闭已就位" if ok else "缺少菜单关闭逻辑"
         r.check("D1", "菜单点别处会消失", d1)
 
         # ── E. 设置窗口 ───────────────────────────────
@@ -339,7 +336,7 @@ def main():
         r.check("E3", "设置窗口能关闭", e3)
 
         def e4():
-            html = open(SETTINGS_HTML, encoding="utf-8").read()
+            html = open(r"C:\ai-pet-live2d\pet-shell\settings.html", encoding="utf-8").read()
             ok = "window.petSettings.close()" in html and "900" in html
             return ok, "保存后自动关闭已实现" if ok else "保存后不会自动关闭"
         r.check("E4", "保存后自动关闭", e4)
@@ -426,25 +423,29 @@ def main():
         r.check("G2", "麦克风已打开", g2)
 
         def g3():
-            src = open(BRIDGE_PY, encoding="utf-8").read()
+            src = open(r"C:\Users\Administrator\Documents\deepseek-harness"
+                       r"\default-workspace\dafeiyu-pet\voice_bridge.py", encoding="utf-8").read()
             ok = ("_echo" in src) and ("重复的一句" in src) and ("电平" in src and "噪声丢弃" in src)
             return ok, "回声抑制+去重+电平门限 都在" if ok else "缺少防重复机制"
         r.check("G3", "不重复回话（机制）", g3)
 
         def g4():
-            src = open(BRIDGE_PY, encoding="utf-8").read()
+            src = open(r"C:\Users\Administrator\Documents\deepseek-harness"
+                       r"\default-workspace\dafeiyu-pet\voice_bridge.py", encoding="utf-8").read()
             ok = ("ask_timed" in src) and ("PROMPT_TIMEOUT = 45" in src)
             return ok, "大脑调用有硬超时" if ok else "缺少超时保护"
         r.check("G4", "大脑不会卡死", g4)
 
         # ── H. 独立性 ────────────────────────────────
         def h1():
-            cfg = json.load(open(BRIDGE_CFG, encoding="utf-8"))
+            cfg = json.load(open(r"C:\Users\Administrator\Documents\deepseek-harness"
+                                 r"\default-workspace\dafeiyu-pet\voice_bridge.json", encoding="utf-8"))
             return cfg.get("brain_mode") == "api", "brain_mode=%s" % cfg.get("brain_mode")
         r.check("H1", "用独立 API 大脑", h1)
 
         def h2():
-            src = open(BRIDGE_PY, encoding="utf-8").read()
+            src = open(r"C:\Users\Administrator\Documents\deepseek-harness"
+                       r"\default-workspace\dafeiyu-pet\voice_bridge.py", encoding="utf-8").read()
             ok = "USE_DSH_CONTEXT = False" in src
             return ok, "不注入主会话" if ok else "仍在读主会话"
         r.check("H2", "不读主会话", h2)

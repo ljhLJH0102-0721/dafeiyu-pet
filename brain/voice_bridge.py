@@ -1237,6 +1237,88 @@ def pick_loudest_device(pa, exclude=()):
             best = (i, r)
     return best
 
+
+# ── 按键说话（PTT） ──────────────────────────────────────
+# 用 GetAsyncKeyState 轮询，不装额外依赖；键位来自设置界面的 KeyboardEvent.code。
+_CODE_TO_VK = {
+    "Backquote": 0xC0, "Minus": 0xBD, "Equal": 0xBB, "BracketLeft": 0xDB,
+    "BracketRight": 0xDD, "Backslash": 0xDC, "Semicolon": 0xBA, "Quote": 0xDE,
+    "Comma": 0xBC, "Period": 0xBE, "Slash": 0xBF, "Space": 0x20,
+    "Tab": 0x09, "CapsLock": 0x14, "Insert": 0x2D, "Delete": 0x2E,
+    "Home": 0x24, "End": 0x23, "PageUp": 0x21, "PageDown": 0x22,
+    "ArrowUp": 0x26, "ArrowDown": 0x28, "ArrowLeft": 0x25, "ArrowRight": 0x27,
+    "ShiftLeft": 0xA0, "ShiftRight": 0xA1, "ControlLeft": 0xA2, "ControlRight": 0xA3,
+    "AltLeft": 0xA4, "AltRight": 0xA5, "NumpadEnter": 0x0D,
+}
+for _i in range(1, 13):
+    _CODE_TO_VK["F%d" % _i] = 0x6F + _i          # F1=0x70 … F12=0x7B
+for _c in "ABCDEFGHIJKLMNOPQRSTUVWXYZ":
+    _CODE_TO_VK["Key" + _c] = ord(_c)            # KeyA…KeyZ
+for _d in range(10):
+    _CODE_TO_VK["Digit%d" % _d] = 0x30 + _d      # Digit0…Digit9
+    _CODE_TO_VK["Numpad%d" % _d] = 0x60 + _d
+
+
+def _vk_of(code):
+    """KeyboardEvent.code → Windows 虚拟键码；不认识的返回 0。"""
+    if not code:
+        return 0
+    code = str(code).strip()
+    if code == "Escape":          # Esc 是保留键，绝不绑定
+        return 0
+    if code.startswith("Numpad") and code[6:].isdigit():
+        return 0x60 + int(code[6:])
+    return _CODE_TO_VK.get(code, 0)
+
+
+def _key_down(vk):
+    if not vk:
+        return False
+    try:
+        return bool(ctypes.windll.user32.GetAsyncKeyState(vk) & 0x8000)
+    except Exception:
+        return False
+
+
+def _ptt_sync(cfg_path, ptt):
+    """把配置里的 voice_mode / ptt_key 同步到 ptt 状态（改了设置不用重启）。"""
+    try:
+        mt = os.path.getmtime(cfg_path)
+    except Exception:
+        return
+    if mt == ptt.get("cfg_mtime"):
+        return
+    ptt["cfg_mtime"] = mt
+    try:
+        with open(cfg_path, "r", encoding="utf-8") as f:
+            cfg = json.load(f)
+    except Exception:
+        return
+    mode = str(cfg.get("voice_mode") or "auto").strip().lower()
+    ptt["mode"] = "ptt" if mode == "ptt" else "auto"
+    vk = _vk_of(cfg.get("ptt_key"))
+    changed = (vk != ptt.get("vk")) or (ptt.get("announced") != (ptt["mode"], vk))
+    ptt["vk"] = vk
+    if ptt["mode"] == "ptt" and not vk:
+        ptt["mode"] = "auto"
+        log("PTT：按键无效（%r），先按「一直听」处理" % cfg.get("ptt_key"))
+    if changed:
+        ptt["announced"] = (ptt["mode"], ptt["vk"])
+        if ptt["mode"] == "ptt":
+            log("对话方式：按键说话（%s，vk=0x%02X）" % (cfg.get("ptt_key"), ptt["vk"]))
+        else:
+            log("对话方式：一直听")
+
+
+def _ptt_down():
+    """当前是否按住了 PTT 键。"""
+    st = _PTT_CTX.get("state") or {}
+    return _key_down(st.get("vk", 0))
+
+
+_PTT_CTX = {}
+
+
 def mic_loop(asr, brain, say_it, vad, context, cfg, device_index, stop_event):
     silero_gate = SileroGate()
     # 已经在用 Silero 切段了，不要再拿 Silero 二次过滤（阈值不同会互相打架）
@@ -1276,6 +1358,14 @@ def mic_loop(asr, brain, say_it, vad, context, cfg, device_index, stop_event):
     _auto_state = {"next_probe": 0.0, "last_speech": time.monotonic()}   # 自动换麦用
     _mic_state = {"fails": 0, "silent_since": 0.0}   # 麦克风自愈：读取失败计数 / 全零起始时间
     _noise = {"v": 0.004}   # 房间底噪（慢速 EMA），用于自适应电平门限
+    # 按键说话（PTT）状态：mode = auto / ptt；vk 来自配置里的 ptt_key
+    _ptt = {"mode": "auto", "vk": 0, "was_muted": False, "muted_frames": 0,
+            "cfg_at": 0.0, "cfg_mtime": None}
+    _PTT_CTX["state"] = _ptt
+    try:
+        _ptt_sync(CFG_PATH, _ptt)
+    except Exception as exc:
+        log("PTT 初始化失败：%s" % exc)
     _beat = {"at": time.monotonic(), "peak": 0.0}   # 心跳：每 60 秒记一次电平，事后能判断「没说话」还是「没在听」
 
     # ── 屏幕快照缓存 ────────────────────────────────────────
@@ -1642,6 +1732,13 @@ def mic_loop(asr, brain, say_it, vad, context, cfg, device_index, stop_event):
             # 心跳：60 秒一次，记下峰值电平；桥"静默失聪"时能一眼看出来
             _beat["peak"] = max(_beat["peak"], float(np.abs(frame).max()))
             _now_beat = time.monotonic()
+            # 设置里改了「对话方式 / 按键」时这里自动跟上，不用重启
+            if _now_beat - _ptt["cfg_at"] > 3.0:
+                _ptt["cfg_at"] = _now_beat
+                try:
+                    _ptt_sync(CFG_PATH, _ptt)
+                except Exception:
+                    pass
             if _now_beat - _beat["at"] > 60.0:
                 _beat["at"] = _now_beat
                 log("心跳：麦克风峰值 %.4f（60s 内）设备 %s" % (
@@ -1650,9 +1747,27 @@ def mic_loop(asr, brain, say_it, vad, context, cfg, device_index, stop_event):
             # 她正在说话 / 刚说完：把这一帧当静音，避免听到自己
             if time.monotonic() < _echo["until"]:
                 frame = np.zeros_like(frame)
+            # 按键说话（PTT）：不按键时把音频换成静音，
+            # 这样 VAD 自然会结束上一句，不用另写一套状态机。
+            if _ptt["mode"] == "ptt":
+                if not _ptt_down():
+                    _ptt["muted_frames"] += 1
+                    if not _ptt["was_muted"]:
+                        log("PTT：松开按键，结束这句")
+                    _ptt["was_muted"] = True
+                    frame = np.zeros_like(frame)
+                else:
+                    if _ptt["was_muted"]:
+                        log("PTT：按住按键，开始收音")
+                    _ptt["was_muted"] = False
+                    _ptt["muted_frames"] = 0
+            else:
+                _ptt["was_muted"] = False
             # 底噪跟踪（慢速 EMA）：门限跟着房间噪声走，固定值要么误杀说话、要么放过噪声
+            # PTT 静音帧不参与底噪统计，否则会把门限越压越低
             _rms_now = float(np.abs(frame).mean())
-            _noise["v"] = _noise["v"] * 0.995 + _rms_now * 0.005
+            if _ptt["mode"] != "ptt" or not _ptt["was_muted"]:
+                _noise["v"] = _noise["v"] * 0.995 + _rms_now * 0.005
             utt = vad.process(frame)
 
             # 电平门限：只挡「几乎无声」的幽灵片段。

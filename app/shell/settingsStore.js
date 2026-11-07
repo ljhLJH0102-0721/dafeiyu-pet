@@ -56,6 +56,9 @@ const UI_DEFAULTS = {
   alwaysOnTop: true,
   // 行为
   roamMode: false,           // 全屏漫游（她可以在整个屏幕活动，不再是那个小框）
+  // 对话方式：auto = 一直听；ptt = 按住按键才听
+  voiceMode: 'auto',
+  pttKey: 'Backquote',       // KeyboardEvent.code；Esc 不允许
   // 大脑
   llm: {
     base_url: 'https://api.z.ai/api/coding/paas/v4',
@@ -118,6 +121,9 @@ function getSettings() {
     voiceName: voice.name || ui.voice.voiceName,
   };
   ui.brainMode = bridge.brain_mode || 'api';
+  // 对话方式以语音桥配置为准（它才是真正执行的）
+  if (bridge.voice_mode === 'ptt' || bridge.voice_mode === 'auto') ui.voiceMode = bridge.voice_mode;
+  if (bridge.ptt_key) ui.pttKey = String(bridge.ptt_key);
   return ui;
 }
 
@@ -130,6 +136,9 @@ function setSettings(patch) {
     soundVolume: patch.soundVolume != null ? Number(patch.soundVolume) : cur.soundVolume,
     alwaysOnTop: patch.alwaysOnTop != null ? !!patch.alwaysOnTop : cur.alwaysOnTop,
     roamMode: patch.roamMode != null ? !!patch.roamMode : cur.roamMode,
+    voiceMode: patch.voiceMode === 'ptt' || patch.voiceMode === 'auto' ? patch.voiceMode : cur.voiceMode,
+    // Esc 是保留键（用来关窗口/取消），不允许绑定
+    pttKey: patch.pttKey && patch.pttKey !== 'Escape' ? String(patch.pttKey) : cur.pttKey,
   };
   writeJson(UI_PATH, nextUI);
 
@@ -151,6 +160,9 @@ function setSettings(patch) {
   if (patch.voice && patch.voice.voiceName) {
     bridge.voice = { ...(bridge.voice || {}), name: patch.voice.voiceName };
   }
+  // 对话方式（语音桥读这两个键）
+  if (nextUI.voiceMode) bridge.voice_mode = nextUI.voiceMode;
+  if (nextUI.pttKey) bridge.ptt_key = nextUI.pttKey;
   writeJson(BRIDGE_PATH, bridge);
 
   return getSettings();
