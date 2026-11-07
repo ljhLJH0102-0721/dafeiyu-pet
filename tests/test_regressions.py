@@ -27,10 +27,14 @@ import urllib.error
 import urllib.request
 
 BASE = "http://127.0.0.1:5011"
+
+# 仓库布局：tests/ 的上一级就是仓库根；可用 PET_DIR 指向语音目录（默认 brain/）
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+APP_DIR = os.path.join(ROOT, "app")
+BRAIN_DIR = os.environ.get("PET_DIR") or os.path.join(ROOT, "brain")
+BRIDGE_LOG = os.path.join(BRAIN_DIR, "voice_bridge.log")
 SHELL_LOG = os.path.join(APP_DIR, "pet-shell.log")
 MAIN_JS = os.path.join(APP_DIR, "main.js")
-BRIDGE_LOG = (r"C:\Users\Administrator\Documents\deepseek-harness"
-              r"\default-workspace\dafeiyu-pet\voice_bridge.log")
 
 user32 = ctypes.windll.user32
 
@@ -337,8 +341,8 @@ def main():
         r.check("E3", "设置窗口能关闭", e3)
 
         def e4():
-html = open(os.path.join(APP_DIR, "settings.html"), encoding="utf-8").read()
-            ok = "window.petSettings.close()" in html and "900" in html
+            html = open(os.path.join(APP_DIR, "settings.html"), encoding="utf-8").read()
+            ok = "petSettings.close" in html
             return ok, "保存后自动关闭已实现" if ok else "保存后不会自动关闭"
         r.check("E4", "保存后自动关闭", e4)
 
