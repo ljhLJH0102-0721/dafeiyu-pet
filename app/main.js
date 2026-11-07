@@ -272,11 +272,13 @@ function openSettings() {
 ipcMain.handle('settings:get', () => settingsStore.getSettings());
 ipcMain.handle('settings:set', (_e, patch) => {
   try {
+    const before = settingsStore.getSettings();
     const next = settingsStore.setSettings(patch || {});
     settingsApply.apply(win, next, log, { setRoam: (on) => { try { geo.setRoam(on); } catch (e) {} } });
     syncPttShortcut();
     // 只有音色这类启动时才读的配置需要重启；API 配置支持热重载
-    if (patch && patch.voice) settingsApply.restartBridge(log);
+    // 只有音色真的变了才重启语音桥（否则每次保存都会重启，白等 10 秒）
+    if (patch && patch.voice && patch.voice.voiceName && patch.voice.voiceName !== before.voice.voiceName) settingsApply.restartBridge(log);
     return { ok: true, settings: next };
   } catch (err) {
     log('[settings] 保存失败', String(err));
@@ -555,6 +557,24 @@ function handleMenuAction(id) {
 }
 
 let menuWin = null;
+/** 把菜单框拉回可见桌面：返回一个一定在屏幕内的坐标 */
+function clampMenuPos(x, y, w, h) {
+  let area = { x: 0, y: 0, width: 1920, height: 1080 };
+  try {
+    const d = screen.getDisplayNearestPoint({ x: Math.round(x), y: Math.round(y) });
+    area = d.workArea || area;
+  } catch (e) {}
+  const minX = area.x + 8;
+  const maxX = area.x + area.width - w - 8;
+  const minY = area.y + 8;
+  const maxY = area.y + area.height - h - 8;
+  return {
+    x: Math.max(minX, Math.min(Math.round(x), Math.max(minX, maxX))),
+    y: Math.max(minY, Math.min(Math.round(y), Math.max(minY, maxY))),
+    area,
+  };
+}
+
 function openContextMenu() {
   const pt = screen.getCursorScreenPoint();
   if (!menuWin || menuWin.isDestroyed()) {
@@ -585,13 +605,31 @@ function openContextMenu() {
   } else {
     menuWin.webContents.send('menu:items', buildMenuData());
   }
-  // 贴边回拉：别让菜单跑到屏幕外面
-  let wa = { x: 0, y: 0, width: 1920, height: 1080 };
-  try { wa = geo.display().wa; } catch (e) {}
-  const w = 276;
-  const x = Math.min(pt.x, wa.x + wa.width - w - 16);
-  const y = Math.min(pt.y, wa.y + wa.height - 200);
-  try { menuWin.setPosition(Math.max(wa.x + 8, x), Math.max(wa.y + 8, y)); } catch (e) {}
+
+  // 落点：优先鼠标位置；鼠标不在任何屏幕上（或她跑到屏幕外）时，
+  // 退回到她窗口的可见部分附近 —— 保证菜单永远出现在看得见的地方。
+  let anchorX = pt.x;
+  let anchorY = pt.y;
+  try {
+    const b = geo.get();
+    const onScreen = screen.getAllDisplays().some((d) => {
+      const a = d.workArea;
+      return pt.x >= a.x && pt.x < a.x + a.width && pt.y >= a.y && pt.y < a.y + a.height;
+    });
+    if (!onScreen) {
+      // 取她窗口和当前显示器工作区的交集中心
+      const d = screen.getDisplayNearestPoint({ x: b.x, y: b.y }).workArea;
+      const left = Math.max(b.x, d.x);
+      const right = Math.min(b.x + b.w, d.x + d.width);
+      const top = Math.max(b.y, d.y);
+      const bottom = Math.min(b.y + b.h, d.y + d.height);
+      anchorX = right > left ? Math.round((left + right) / 2) : d.x + Math.round(d.width / 2);
+      anchorY = bottom > top ? Math.round((top + bottom) / 2) : d.y + 120;
+    }
+  } catch (e) {}
+
+  const pos = clampMenuPos(anchorX, anchorY, 276, 420);
+  try { menuWin.setPosition(pos.x, pos.y); } catch (e) {}
   try { menuWin.show(); menuWin.focus(); menuWin.moveTop(); } catch (e) {}
 }
 
@@ -608,12 +646,9 @@ ipcMain.on('menu:resize', (_e, size) => {
     const b = menuWin.getBounds();
     const h = Math.max(160, Math.min(720, Math.round((size && size.h) || 420)));
     const w = Math.max(240, Math.min(360, Math.round((size && size.w) || 276)));
-    let wa = { x: 0, y: 0, width: 1920, height: 1080 };
-    try { wa = geo.display().wa; } catch (e) {}
-    // 变高之后不能超出屏幕底部
-    const y = Math.min(b.y, wa.y + wa.height - h - 8);
-    const x = Math.min(b.x, wa.x + wa.width - w - 8);
-    menuWin.setBounds({ x, y, width: w, height: h });
+    // 变高之后重新夹一次，保证整块菜单都在可见桌面内
+    const pos = clampMenuPos(b.x, b.y, w, h);
+    menuWin.setBounds({ x: pos.x, y: pos.y, width: w, height: h });
   } catch (e) {}
 });
 
@@ -981,11 +1016,12 @@ function startApiServer() {
     if (url === '/settings/apply' && req.method === 'POST') {
       return body((d) => {
         try {
+          const before = settingsStore.getSettings();
           const next = settingsStore.setSettings(d || {});
           settingsApply.apply(win, next, log, { setRoam: (on) => { try { geo.setRoam(on); } catch (e) {} } });
           try { syncPttShortcut(); } catch (e) {}
     // 只有音色这类启动时才读的配置需要重启；API 配置支持热重载
-          if (d && d.voice) settingsApply.restartBridge(log);
+          if (d && d.voice && d.voice.voiceName && d.voice.voiceName !== before.voice.voiceName) settingsApply.restartBridge(log);
           return send(200, { ok: true, settings: next });
         } catch (err) {
           return send(500, { ok: false, error: String(err) });

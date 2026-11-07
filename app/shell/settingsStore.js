@@ -59,6 +59,10 @@ const UI_DEFAULTS = {
   // 对话方式：auto = 一直听；ptt = 按住按键才听
   voiceMode: 'auto',
   pttKey: 'Backquote',       // KeyboardEvent.code；Esc 不允许
+  // 时事新闻推送
+  newsEnabled: false,
+  newsIntervalMin: 30,
+  newsTopics: ['AI', '游戏'],
   // 大脑
   llm: {
     base_url: 'https://api.z.ai/api/coding/paas/v4',
@@ -124,6 +128,10 @@ function getSettings() {
   // 对话方式以语音桥配置为准（它才是真正执行的）
   if (bridge.voice_mode === 'ptt' || bridge.voice_mode === 'auto') ui.voiceMode = bridge.voice_mode;
   if (bridge.ptt_key) ui.pttKey = String(bridge.ptt_key);
+  // 新闻
+  if (bridge.news_enabled != null) ui.newsEnabled = !!bridge.news_enabled;
+  if (bridge.news_interval_min) ui.newsIntervalMin = Number(bridge.news_interval_min) || 30;
+  if (Array.isArray(bridge.news_topics)) ui.newsTopics = bridge.news_topics.map(String);
   return ui;
 }
 
@@ -139,6 +147,9 @@ function setSettings(patch) {
     voiceMode: patch.voiceMode === 'ptt' || patch.voiceMode === 'auto' ? patch.voiceMode : cur.voiceMode,
     // Esc 是保留键（用来关窗口/取消），不允许绑定
     pttKey: patch.pttKey && patch.pttKey !== 'Escape' ? String(patch.pttKey) : cur.pttKey,
+    newsEnabled: patch.newsEnabled != null ? !!patch.newsEnabled : cur.newsEnabled,
+    newsIntervalMin: patch.newsIntervalMin != null ? Math.max(5, Number(patch.newsIntervalMin) || 30) : cur.newsIntervalMin,
+    newsTopics: Array.isArray(patch.newsTopics) ? patch.newsTopics.map(String) : cur.newsTopics,
   };
   writeJson(UI_PATH, nextUI);
 
@@ -163,6 +174,10 @@ function setSettings(patch) {
   // 对话方式（语音桥读这两个键）
   if (nextUI.voiceMode) bridge.voice_mode = nextUI.voiceMode;
   if (nextUI.pttKey) bridge.ptt_key = nextUI.pttKey;
+  // 新闻推送
+  bridge.news_enabled = !!nextUI.newsEnabled;
+  bridge.news_interval_min = nextUI.newsIntervalMin;
+  bridge.news_topics = nextUI.newsTopics || [];
   writeJson(BRIDGE_PATH, bridge);
 
   return getSettings();

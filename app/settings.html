@@ -184,6 +184,19 @@
   button.primary:hover { filter: brightness(1.05); }
   button.primary:active { transform: translateY(1px); }
 
+  .chips .topic {
+    display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
+    padding: 6px 12px; border-radius: 999px; font-size: 12.5px;
+    border: 1px solid #dbe6f7; background: #fbfdff; color: #41628f;
+    transition: all .15s; user-select: none;
+  }
+  .chips .topic:hover { border-color: var(--blue); color: var(--blue-deep); }
+  .chips .topic input { display: none; }
+  .chips .topic.on {
+    background: linear-gradient(145deg, #6f9bff, var(--blue)); border-color: var(--blue);
+    color: #fff; font-weight: 600; box-shadow: 0 4px 12px rgba(47,107,255,.25);
+  }
+
   .about-line { color: var(--muted); font-size: 12.5px; line-height: 1.9; margin: 0; }
   .about-line b { color: var(--ink); }
 </style>
@@ -198,6 +211,7 @@
     <nav class="nav">
       <button class="on" data-tab="brain"><span class="ico">◈</span>大脑 / API</button>
       <button data-tab="voice"><span class="ico">◎</span>语音对话</button>
+      <button data-tab="news"><span class="ico">📰</span>资讯</button>
       <button data-tab="look"><span class="ico">✦</span>外观 / 行为</button>
       <button data-tab="about"><span class="ico">ℹ</span>关于</button>
     </nav>
@@ -286,6 +300,33 @@
         </div>
       </section>
 
+      <!-- 资讯 -->
+      <section id="tab-news">
+        <div class="card">
+          <h2>时事新闻</h2>
+          <div class="row">
+            <label>主动告诉我</label>
+            <label class="switch"><input id="newsEnabled" type="checkbox" /><span class="track"></span></label>
+            <span style="color:#8a99b3;font-size:12px">每半小时看一眼热点，有新的念给你听</span>
+          </div>
+          <div class="row">
+            <label>多久看一次</label>
+            <select id="newsInterval" style="max-width:160px">
+              <option value="15">15 分钟</option>
+              <option value="30">30 分钟</option>
+              <option value="60">1 小时</option>
+              <option value="120">2 小时</option>
+            </select>
+          </div>
+          <p class="hint" style="margin-left:116px">没有新的、或者都不在你选的方向里，她就一声不吭。</p>
+        </div>
+        <div class="card">
+          <h2>她关心哪些方向</h2>
+          <div class="chips" id="newsTopics" style="display:flex;flex-wrap:wrap;gap:8px;padding-left:2px">
+          </div>
+          <p class="hint" style="margin-left:2px">勾选的方向才会去看；都不选等于关闭。</p>
+        </div>
+      </section>
       <!-- 外观 / 行为 -->
       <section id="tab-look">
         <div class="card">
@@ -405,6 +446,11 @@
     recording = false;
     $('keyBtn').classList.remove('recording');
     $('keyBtn').textContent = keyLabel(pttKey);
+
+    $('newsEnabled').checked = !!s.newsEnabled;
+    $('newsInterval').value = String(s.newsIntervalMin || 30);
+    chosenTopics = Array.isArray(s.newsTopics) ? s.newsTopics.slice() : [];
+    renderTopics();
   });
 
   $('soundVolume').addEventListener('input', (e) => {
@@ -421,6 +467,32 @@
     }
     m = m.replace(/^deepseek[- _]?/i, '');
     return m;
+  }
+
+  // ── 资讯兴趣 ────────────────────────────────────
+  const NEWS_TOPICS = ['游戏', '动画', 'AI', '金融', '科技', '社会'];
+  let chosenTopics = [];
+
+  function renderTopics() {
+    const box = $('newsTopics');
+    box.innerHTML = '';
+    for (const t of NEWS_TOPICS) {
+      const el = document.createElement('label');
+      el.className = 'topic' + (chosenTopics.indexOf(t) >= 0 ? ' on' : '');
+      el.innerHTML = '<input type="checkbox" /><span></span>';
+      el.querySelector('span').textContent = t;
+      const cb = el.querySelector('input');
+      cb.checked = chosenTopics.indexOf(t) >= 0;
+      cb.addEventListener('change', () => {
+        if (cb.checked) {
+          if (chosenTopics.indexOf(t) < 0) chosenTopics.push(t);
+        } else {
+          chosenTopics = chosenTopics.filter((x) => x !== t);
+        }
+        el.classList.toggle('on', cb.checked);
+      });
+      box.appendChild(el);
+    }
   }
 
   function fill(s) {
@@ -440,6 +512,11 @@
     document.querySelectorAll('#modeSeg button').forEach((x) => x.classList.toggle('on', x.dataset.mode === mode));
     $('keyRow').classList.toggle('dim', mode !== 'ptt');
     $('keyBtn').textContent = keyLabel(pttKey);
+
+    $('newsEnabled').checked = !!s.newsEnabled;
+    $('newsInterval').value = String(s.newsIntervalMin || 30);
+    chosenTopics = Array.isArray(s.newsTopics) ? s.newsTopics.slice() : [];
+    renderTopics();
   }
 
   async function load() {
@@ -460,6 +537,9 @@
       roamMode: $('roamMode').checked,
       voiceMode: mode,
       pttKey: pttKey,
+      newsEnabled: $('newsEnabled').checked,
+      newsIntervalMin: Number($('newsInterval').value),
+      newsTopics: chosenTopics,
       voice: { voiceName: $('voiceName').value },
     };
     const res = await window.petSettings.set(patch);

@@ -63,6 +63,12 @@ try:
     import pet_net as PetNet
 except Exception:  # pragma: no cover
     PetNet = None
+
+# 时事新闻（半小时一次，按兴趣挑，没新的就不吭声）
+try:
+    import pet_news as PetNews
+except Exception:  # pragma: no cover
+    PetNews = None
 # Live2D 桌宠（大肥鱼）控制接口；桌宠没开时所有调用都会安全返回 None
 try:
     import live2d_pet
@@ -224,6 +230,10 @@ DEFAULTS = {
     # 默认不要求唤醒词：中文识别器常把 "DeepSeek" 认成「对不是」，
     # 硬要求喊词的结果是说什么都被忽略、桌宠看起来像哑的。
     "require_wake": False,
+    # 时事新闻推送（可在设置界面开关）
+    "news_enabled": False,
+    "news_interval_min": 30,
+    "news_topics": [],
     "wake_words": ["deepseek", "deep seek", "迪普西克", "地普西克", "滴普西克", "深度求索",
                    "迪普西", "大肥鱼", "小迪"],
     "wake_window_s": 20,       # 喊完之后多久内可以直接接着说
@@ -1365,6 +1375,64 @@ def _ptt_down():
 _PTT_CTX = {}
 
 
+def news_loop(stop_event, say_it):
+    """每 N 分钟看一眼热榜：有主人在意的新消息就念两条，没有就闭嘴。"""
+    if PetNews is None:
+        return
+    last_run = 0.0
+    while not stop_event.is_set():
+        try:
+            cfg = load_config()
+            if cfg.get("news_enabled"):
+                interval = max(5, int(cfg.get("news_interval_min") or 30)) * 60
+                now = time.monotonic()
+                if last_run == 0.0:
+                    last_run = now          # 刚启动先别急着推，等一个周期
+                elif now - last_run >= interval:
+                    last_run = now
+                    topics = cfg.get("news_topics") or []
+                    seen = PetNews.load_seen()
+                    items = PetNews.pick(topics, seen, limit=2)
+                    if items:
+                        PetNews.save_seen(seen + [x["title"] for x in items])
+                        line = PetNews.build_line(items)
+                        log("新闻推送（%s）：%s" % ("/".join(sorted(set(x["topic"] for x in items))), line[:100]))
+                        try:
+                            if live2d_pet is not None:
+                                live2d_pet.bubble(line[:90], 10)
+                        except Exception:
+                            pass
+                        say_it(line)
+                    else:
+                        log("新闻：这轮没有新的感兴趣消息，不打扰")
+        except Exception as exc:
+            log("新闻循环出错：%s" % exc)
+        stop_event.wait(30)
+
+
+def news_once(say_it):
+    """立刻抓一次（测试 / 手动触发用）。返回念出来的那句话。"""
+    if PetNews is None:
+        return ""
+    cfg = load_config()
+    topics = cfg.get("news_topics") or []
+    seen = PetNews.load_seen()
+    items = PetNews.pick(topics, seen, limit=2)
+    if not items:
+        log("新闻（手动）：没有新的感兴趣消息")
+        return ""
+    PetNews.save_seen(seen + [x["title"] for x in items])
+    line = PetNews.build_line(items)
+    log("新闻（手动）：%s" % line[:120])
+    try:
+        if live2d_pet is not None:
+            live2d_pet.bubble(line[:90], 10)
+    except Exception:
+        pass
+    say_it(line)
+    return line
+
+
 def mic_loop(asr, brain, say_it, vad, context, cfg, device_index, stop_event):
     silero_gate = SileroGate()
     # 已经在用 Silero 切段了，不要再拿 Silero 二次过滤（阈值不同会互相打架）
@@ -1686,7 +1754,13 @@ def mic_loop(asr, brain, say_it, vad, context, cfg, device_index, stop_event):
                     os.remove(cmd_file)
                     if text:
                         log("收到 command.txt 指令：%r" % text[:120])
-                        if text.startswith("SAY:"):
+                        if text.startswith("NEWS:"):
+                            # 立刻抓一次新闻（测试 / 手动触发）
+                            try:
+                                news_once(say_it)
+                            except Exception as exc:
+                                log("新闻触发失败：%s" % exc)
+                        elif text.startswith("SAY:"):
                             # 直接朗读固定台词（不经过大脑，不消耗 token）
                             # 用途：右键菜单的「打个招呼」「摸摸头」这类互动语音
                             line = text[4:].strip()
@@ -2064,6 +2138,10 @@ def main():
         vad = _sil
     context = Context(cfg.get("context_turns", 6), use_dsh_context=USE_DSH_CONTEXT)
     stop_event = threading.Event()
+    try:
+        threading.Thread(target=news_loop, args=(stop_event, say_it), daemon=True).start()
+    except Exception as exc:
+        log("新闻线程启动失败：%s" % exc)
     try:
         mic_loop(asr, brain, say_it, vad, context, cfg, device_index, stop_event)
     except KeyboardInterrupt:

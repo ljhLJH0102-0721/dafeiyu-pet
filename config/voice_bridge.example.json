@@ -23,7 +23,7 @@
   ],
   "confirm_window_s": 60,
   "ocr_scope": "active",
-  "merge_gap_ms": 300,
+  "merge_gap_ms": 600,
   "commands_bypass_wake": true,
   "brain_mode": "api",
   "llm": {
@@ -38,5 +38,11 @@
   },
   "weather_city": "",
   "voice_mode": "auto",
-  "ptt_key": "Backquote"
+  "ptt_key": "Backquote",
+  "news_enabled": true,
+  "news_interval_min": 30,
+  "news_topics": [
+    "AI",
+    "游戏"
+  ]
 }
