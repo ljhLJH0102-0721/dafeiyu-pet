@@ -61,11 +61,14 @@ def extract_city(text, default=None):
         if c in s:
             return c
     # 「XX天气」这种，取 2~4 个汉字
-    m = re.search(r"([\u4e00-\u9fa5]{2,4})(?:的)?(?:今天|明天|现在)?天气", s)
+    # 注意用非贪婪 + 把「的/市/县/区」放进可选组：
+    # 以前贪婪匹配会把「罗定的天气」吃成「罗定的」，查天气就查不到。
+    m = re.search(r"([\u4e00-\u9fa5]{2,4}?)(?:的|市|县|区)?(?:今天|明天|后天|现在)?(?:的)?(?:天气|气温)", s)
     if m:
         cand = m.group(1)
-        for stop in ("今天", "明天", "现在", "这里", "那里", "外面", "最近", "我们"):
+        for stop in ("今天", "明天", "后天", "现在", "这里", "那里", "外面", "最近", "我们"):
             cand = cand.replace(stop, "")
+        cand = cand.strip("的市县区省")
         if 2 <= len(cand) <= 4:
             return cand
     return default or None
@@ -83,16 +86,32 @@ def weather(city=None):
             area = (a.get("areaName") or [{}])[0].get("value", "")
             region = (a.get("region") or [{}])[0].get("value", "")
             if region and region != area:
-                area = "%s%s" % (region, area)
+                area = "%s %s" % (region, area)
         desc_zh = {
             "Sunny": "晴", "Clear": "晴", "Partly cloudy": "多云", "Cloudy": "阴",
             "Overcast": "阴", "Mist": "薄雾", "Fog": "雾", "Patchy rain nearby": "局部有雨",
             "Light rain": "小雨", "Moderate rain": "中雨", "Heavy rain": "大雨",
             "Light drizzle": "毛毛雨", "Patchy light rain": "零星小雨",
             "Thundery outbreaks in nearby": "附近雷阵雨", "Light snow": "小雪",
+            # wttr.in 还会吐这些，没翻译就会在她嘴里冒出英文
+            "Overcast ": "阴", "Overcast": "阴", "Haze": "霾", "Smoky haze": "烟霾",
+            "Mist ": "薄雾", "Patchy rain possible": "可能有雨", "Light rain shower": "阵雨",
+            "Moderate rain at times": "间歇中雨", "Heavy rain at times": "间歇大雨",
+            "Rain": "雨", "Patchy light drizzle": "零星小雨", "Freezing fog": "冻雾",
+            "Blizzard": "暴雪", "Moderate snow": "中雪", "Heavy snow": "大雪",
+            "Sleet": "雨夹雪", "Patchy snow possible": "可能有雪",
+            "Thundery outbreaks possible": "可能有雷阵雨",
+            "Patchy light rain with thunder": "雷阵雨",
+            "Moderate or heavy rain shower": "中到大雨", "Torrential rain shower": "暴雨",
         }
         en = (cur.get("weatherDesc") or [{}])[0].get("value", "")
         desc = desc_zh.get(en, en)
+        # 显示名：用户说了中文城市就用他说的那个。
+        # wttr.in 对县级市（比如罗定）经常给错名字或给拼音（返回 Shengjiang），
+        # 用原话显示至少不会让她把「罗定」说成别的地方。
+        asked = (city or "").strip()
+        if asked and re.search(r"[\u4e00-\u9fff]", asked):
+            area = asked
         parts = []
         if area:
             parts.append(area)
