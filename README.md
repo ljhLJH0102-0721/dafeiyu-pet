@@ -1,8 +1,8 @@
 # 大肥鱼桌宠 · Dafeiyu Desktop Pet
 
 > **模型作者：神宫凉子（B 站）**
-> 本仓库不包含模型文件（`.moc3` / 贴图 / 表情），版权归作者所有，请到作者处获取。
-> 拿到后放到 `renderer/public/Resources/大肥鱼/` 即可，详见 [CREDITS.md](CREDITS.md)。
+> 本仓库**包含**模型文件（`.moc3` / 贴图 / 表情），仅用于学习、演示与技术交流；**请勿商用**。
+> 改编或再发布请先取得作者授权，版权归作者所有。详细声明见 [MODEL-NOTICE.md](MODEL-NOTICE.md)，其他致谢见 [CREDITS.md](CREDITS.md)。
 
 
 > 一个跑在 Windows 上的 Live2D 桌面宠物：**能聊天、能听你说话、能帮你点屏幕**。
