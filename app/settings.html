@@ -350,6 +350,11 @@
             <span style="color:#8a99b3;font-size:12px">保证不被别的窗口盖住</span>
           </div>
           <div class="row">
+            <label>看我用什么</label>
+            <label class="switch"><input id="windowWatch" type="checkbox" /><span class="track"></span></label>
+            <span style="color:#8a99b3;font-size:12px">切到 Steam / 编辑器 / 浏览器时，她随口接一句</span>
+          </div>
+          <div class="row">
             <label>全屏漫游</label>
             <label class="switch"><input id="roamMode" type="checkbox" /><span class="track"></span></label>
             <span style="color:#8a99b3;font-size:12px">整屏活动，没有小框</span>
@@ -448,6 +453,7 @@
     $('keyBtn').classList.remove('recording');
     $('keyBtn').textContent = keyLabel(pttKey);
 
+    $('windowWatch').checked = s.windowWatch !== false;
     $('newsEnabled').checked = !!s.newsEnabled;
     $('newsInterval').value = String(s.newsIntervalMin || 30);
     chosenTopics = Array.isArray(s.newsTopics) ? s.newsTopics.slice() : [];
@@ -515,6 +521,7 @@
     $('keyBtn').textContent = keyLabel(pttKey);
 
 
+    $('windowWatch').checked = s.windowWatch !== false;
     $('newsEnabled').checked = !!s.newsEnabled;
     $('newsInterval').value = String(s.newsIntervalMin || 30);
     chosenTopics = Array.isArray(s.newsTopics) ? s.newsTopics.slice() : [];
@@ -539,6 +546,7 @@
       roamMode: $('roamMode').checked,
       voiceMode: mode,
       pttKey: pttKey,
+      windowWatch: $('windowWatch').checked,
       newsEnabled: $('newsEnabled').checked,
       newsIntervalMin: Number($('newsInterval').value),
       newsTopics: chosenTopics,

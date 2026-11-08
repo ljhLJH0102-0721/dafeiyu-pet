@@ -69,6 +69,12 @@ try:
     import pet_news as PetNews
 except Exception:  # pragma: no cover
     PetNews = None
+
+# 前台窗口（她在看你用什么软件）。Python 能读窗口信息，只是不能模拟鼠标键盘。
+try:
+    import pet_window as PetWindow
+except Exception:  # pragma: no cover
+    PetWindow = None
 # Live2D 桌宠（大肥鱼）控制接口；桌宠没开时所有调用都会安全返回 None
 try:
     import live2d_pet
@@ -83,6 +89,9 @@ TYPE_VIA = "auto"        # auto（默认） | inject | plugin
 
 
 _ROUTE_CACHE = {"v": None}      # 打字通道只探测一次就定下来（每句都探会来回翻）
+
+# 前台窗口状态：exe / title / 进入时间（提示词和窗口线程共用）
+_win_state = {"exe": "", "title": "", "since": 0.0}
 
 
 def _type_route():
@@ -1444,6 +1453,51 @@ def news_once(say_it):
     return line
 
 
+def window_loop(stop_event, say_it):
+    """每 4 秒看一眼前台窗口：稳定切到某个软件，就随口说一句。
+
+    接话是固定台词（0 token）；真正的上下文由提示词前置的一行
+    「（主人现在前台在用：X）」承担。
+    冷却：同一个软件 cooldown 分钟内只主动开口一次，免得来回切窗口被念个不停。
+    """
+    if PetWindow is None:
+        return
+    said = {}
+    last = {"exe": "", "since": 0.0}
+    while not stop_event.is_set():
+        try:
+            cfg = load_config()
+            if not cfg.get("window_watch", True):
+                stop_event.wait(5)
+                continue
+            f = PetWindow.foreground()
+            exe = (f.get("exe") or "").lower()
+            title = f.get("title") or ""
+            now = time.monotonic()
+            if exe != last["exe"]:
+                last = {"exe": exe, "since": now}
+                _win_state.update({"exe": exe, "title": title, "since": now})
+            else:
+                _win_state["title"] = title
+                stable = now - last["since"]
+                if exe and 8.0 <= stable <= 14.0:
+                    line, label = PetWindow.react_to(exe, title)
+                    if line:
+                        cooldown = max(5, int(cfg.get("window_cooldown_min") or 20)) * 60
+                        if now - said.get(exe, -1e9) >= cooldown:
+                            said[exe] = now
+                            log("窗口感知 → %s：%s" % (label, line))
+                            try:
+                                if live2d_pet is not None:
+                                    live2d_pet.bubble(line, 6)
+                            except Exception:
+                                pass
+                            say_it(line)
+        except Exception as exc:
+            log("窗口感知出错：%s" % exc)
+        stop_event.wait(4)
+
+
 def mic_loop(asr, brain, say_it, vad, context, cfg, device_index, stop_event):
     silero_gate = SileroGate()
     # 已经在用 Silero 切段了，不要再拿 Silero 二次过滤（阈值不同会互相打架）
@@ -1460,6 +1514,7 @@ def mic_loop(asr, brain, say_it, vad, context, cfg, device_index, stop_event):
     # 不加这个会形成回声环：她说的话从喇叭出来又被麦克风收进去，
     # ASR 再识别一遍 → 又一个回复 → 无限重复（实测同一句被回复 3 次）。
     _echo = {"until": 0.0}
+
     _last_said = {"key": "", "at": 0.0}   # 同句去重：回声/重复说话避免重复回复
     _orig_say = say_it
 
@@ -1638,6 +1693,17 @@ def mic_loop(asr, brain, say_it, vad, context, cfg, device_index, stop_event):
                 if screen_text:
                     log("带上屏幕文字：%d 字" % len(screen_text))
                 prompt_text = context.compose(command_text, screen_text)
+                # 「主人现在在用哪个软件」：一句很短的提示，让她接得上上下文。
+                # 只在窗口稳定了 3 秒以上才带，避免 alt-tab 时瞎猜。
+                try:
+                    if PetWindow is not None and cfg.get("window_watch", True):
+                        w = _win_state
+                        if w.get("exe") and time.monotonic() - w.get("since", 0) > 3:
+                            desc = PetWindow.describe(w["exe"], w.get("title", ""))
+                            if desc:
+                                prompt_text = "（主人现在前台在用：%s）\n" % desc + prompt_text
+                except Exception:
+                    pass
                 try:
                     if PetNet is not None and PetNet.looks_like_info_need(command_text):
                         _city = (load_config().get("weather_city") or None)
@@ -2166,6 +2232,7 @@ def main():
     stop_event = threading.Event()
     try:
         threading.Thread(target=news_loop, args=(stop_event, say_it), daemon=True).start()
+        threading.Thread(target=window_loop, args=(stop_event, say_it), daemon=True).start()
     except Exception as exc:
         log("新闻线程启动失败：%s" % exc)
     try:

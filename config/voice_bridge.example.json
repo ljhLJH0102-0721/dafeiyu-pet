@@ -45,5 +45,7 @@
     "AI",
     "游戏",
     "动画"
-  ]
+  ],
+  "window_watch": true,
+  "window_cooldown_min": 20
 }

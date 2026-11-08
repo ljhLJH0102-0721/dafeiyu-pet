@@ -61,6 +61,8 @@ const UI_DEFAULTS = {
   pttKey: 'Backquote',       // KeyboardEvent.code；Esc 不允许
   // 插件（创意工坊）：id → 是否启用
   plugins: {},
+  // 看她用什么软件，随口接一句
+  windowWatch: true,
   // 时事新闻推送
   newsEnabled: false,
   newsIntervalMin: 30,
@@ -133,6 +135,7 @@ function getSettings() {
   // 插件启用状态存在 shell 自己的设置里
   if (ui.plugins && typeof ui.plugins === 'object') { /* 已是对象 */ }
   // 新闻
+  if (bridge.window_watch != null) ui.windowWatch = !!bridge.window_watch;
   if (bridge.news_enabled != null) ui.newsEnabled = !!bridge.news_enabled;
   if (bridge.news_interval_min) ui.newsIntervalMin = Number(bridge.news_interval_min) || 30;
   if (Array.isArray(bridge.news_topics)) ui.newsTopics = bridge.news_topics.map(String);
@@ -151,6 +154,7 @@ function setSettings(patch) {
     voiceMode: patch.voiceMode === 'ptt' || patch.voiceMode === 'auto' ? patch.voiceMode : cur.voiceMode,
     // Esc 是保留键（用来关窗口/取消），不允许绑定
     pttKey: patch.pttKey && patch.pttKey !== 'Escape' ? String(patch.pttKey) : cur.pttKey,
+    windowWatch: patch.windowWatch != null ? !!patch.windowWatch : cur.windowWatch,
     plugins: (patch.plugins && typeof patch.plugins === 'object')
       ? Object.assign({}, cur.plugins, patch.plugins)
       : cur.plugins,
@@ -182,6 +186,7 @@ function setSettings(patch) {
   if (nextUI.voiceMode) bridge.voice_mode = nextUI.voiceMode;
   if (nextUI.pttKey) bridge.ptt_key = nextUI.pttKey;
   // 新闻推送
+  bridge.window_watch = !!nextUI.windowWatch;
   bridge.news_enabled = !!nextUI.newsEnabled;
   bridge.news_interval_min = nextUI.newsIntervalMin;
   bridge.news_topics = nextUI.newsTopics || [];
