@@ -201,6 +201,12 @@ function createWindow() {
     transparent: true,
     frame: false,
     hasShadow: false,
+    // 关键：thickFrame 为真时 Windows 会给窗口一个"可调整大小的边框"，
+    // 缩放瞬间会闪出一圈 1px 的框线（用户看到的"线条边边"）。
+    // 我们缩放走的是滚轮/菜单（setBounds），不需要拖窗口边缘，所以关掉它。
+    thickFrame: false,
+    // 圆角也一样：Windows 11 的圆角遮罩在窗口尺寸变化时可能露出边缘
+    roundedCorners: false,
     resizable: true,           // 允许拖窗口边缘缩放（几何对账已能吸收 1px 抖动，不再越拖越大）
     useContentSize: false,
     alwaysOnTop: true,
