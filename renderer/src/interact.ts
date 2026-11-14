@@ -916,6 +916,34 @@ export function setupInteraction(): void {
   // 启动时也检查一次（缓存里的适配结果可能来自更小的窗口）
   window.setTimeout(() => { try { fit.ensureVisible(); } catch (e) {} }, 1200);
 
+  // 彩蛋（不写进文档）：连续打出她的名字或暗号，她会有点反应。
+  // 只在她的窗口有焦点时生效（点一下她就有了），不会记录别处的内容。
+  let lastEggAt = 0;
+  const eggBuf: string[] = [];
+  const eggFire = (kind: string) => {
+    const now = Date.now();
+    if (now - lastEggAt < 180000) return;
+    lastEggAt = now;
+    try {
+      if (kind === 'name') {
+        (window as any).__react?.('surprise');
+        (window as any).__twist?.();
+        (window as any).__bubble?.('诶…你叫我名字？', 3.5);
+      } else if (kind === 'momo') {
+        (window as any).__react?.('nod');
+        (window as any).__bubble?.('嘿嘿…', 3.5);
+      }
+    } catch (e) {}
+  };
+  window.addEventListener('keydown', (e) => {
+    if (!e.key || e.key.length !== 1) return;
+    eggBuf.push(e.key.toLowerCase());
+    if (eggBuf.length > 32) eggBuf.shift();
+    const s = eggBuf.join('');
+    if (s.endsWith('dafeiyu')) { eggBuf.length = 0; eggFire('name'); }
+    else if (s.endsWith('momo')) { eggBuf.length = 0; eggFire('momo'); }
+  });
+
   // 给外壳/语音桥用：让桌宠做个小反应
   (window as any).__react = (kind: string): boolean => {
     switch (kind) {

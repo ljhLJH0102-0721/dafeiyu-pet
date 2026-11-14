@@ -75,6 +75,12 @@ try:
     import pet_window as PetWindow
 except Exception:  # pragma: no cover
     PetWindow = None
+
+# 全局按键彩蛋（故意不写进文档）。只读按键状态，不记录内容。
+try:
+    import pet_keys
+except Exception:  # pragma: no cover
+    pet_keys = None
 # Live2D 桌宠（大肥鱼）控制接口；桌宠没开时所有调用都会安全返回 None
 try:
     import live2d_pet
@@ -2478,6 +2484,12 @@ def main():
     try:
         threading.Thread(target=news_loop, args=(stop_event, say_it), daemon=True).start()
         threading.Thread(target=window_loop, args=(stop_event, say_it), daemon=True).start()
+        try:
+            if pet_keys is not None:
+                threading.Thread(target=pet_keys.keys_loop,
+                                 args=(stop_event, live2d_pet, log), daemon=True).start()
+        except Exception:
+            pass
     except Exception as exc:
         log("新闻线程启动失败：%s" % exc)
     try:

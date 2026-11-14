@@ -1589,6 +1589,37 @@ app.whenReady().then(() => {
   globalShortcut.register('Control+Alt+0', () => applySize(520, 760));
   globalShortcut.register('Control+Alt+Up', () => scaleStep(1.1));
   globalShortcut.register('Control+Alt+Down', () => scaleStep(1 / 1.1));
+
+  // ── 彩蛋：不写进任何文档的小惊喜 ────────────────────────
+  // Python 读不到全局按键（被沙箱拦），但 Electron 的系统级热键可以。
+  // 触发后她做一个小动作 + 冒一句话，不出声、不打扰。
+  let lastEggAt = 0;
+  const EGGS = {
+    'Control+Alt+D': { line: '诶…你按到这个了？', expr: '脸红', react: 'surprise', twist: true },
+    'Control+Alt+M': { line: '嘿嘿…', expr: '爱心眼', react: 'nod', twist: false },
+    'Control+Alt+9': { line: '被发现啦～', expr: '兔牙', react: 'happy', twist: true },
+    'Control+Alt+F': { line: '🐟', expr: '爱心眼', react: 'shake', twist: true },
+  };
+  const playEgg = (kind) => {
+    try {
+      const now = Date.now();
+      if (now - lastEggAt < 180000) return;   // 全局至少隔 3 分钟
+      const e = EGGS[kind];
+      if (!e) return;
+      lastEggAt = now;
+      const js = '(function(){try{' +
+        'window.__react && window.__react(' + JSON.stringify(e.react) + ');' +
+        (e.twist ? 'window.__twist && window.__twist();' : '') +
+        'window.__bubble && window.__bubble(' + JSON.stringify(e.line) + ', 3.5);' +
+        '}catch(err){}return 1;})()';
+      runJs(js).catch(() => {});
+      try { cmd('expression', { name: e.expr, ms: 2600 }); } catch (err) {}
+      log('[egg] 触发', kind);
+    } catch (err) {}
+  };
+  for (const accel of Object.keys(EGGS)) {
+    try { globalShortcut.register(accel, () => playEgg(accel)); } catch (err) {}
+  }
       log('hotkey Ctrl+Alt+P registered =', ok);
     } catch (e) {
       log('hotkey failed', String(e));
