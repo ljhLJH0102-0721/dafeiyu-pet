@@ -34,6 +34,11 @@ import time
 import urllib.error
 import urllib.request
 
+try:
+    _NO_PROXY_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+except Exception:
+    _NO_PROXY_OPENER = None
+
 DEFAULT_BASE = "https://api.z.ai/api/coding/paas/v4"
 DEFAULT_MODEL = "glm-4-flash"
 DEFAULT_KEY_ENV = "ZAI_CODING_CN_API_KEY"
@@ -122,8 +127,14 @@ class PetLLM:
         # 网络抖动（SSL EOF / 超时）重试两次：她不该因为一次抖动就哑掉
         for attempt in range(3):
             try:
-                with urllib.request.urlopen(req, timeout=timeout or self.timeout) as r:
-                    data = json.loads(r.read().decode("utf-8", "replace"))
+                # 优先直连：系统代理（Clash 之类）挂掉时，urllib 会去连
+                # 127.0.0.1:7897 然后被拒绝——现象就是"她有反应但一直不回复"。
+                if _NO_PROXY_OPENER is not None:
+                    with _NO_PROXY_OPENER.open(req, timeout=timeout or self.timeout) as r:
+                        data = json.loads(r.read().decode("utf-8", "replace"))
+                else:
+                    with urllib.request.urlopen(req, timeout=timeout or self.timeout) as r:
+                        data = json.loads(r.read().decode("utf-8", "replace"))
                 break
             except urllib.error.HTTPError as e:
                 detail = ""
