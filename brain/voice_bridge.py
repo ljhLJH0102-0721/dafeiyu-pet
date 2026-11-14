@@ -801,18 +801,30 @@ def pick_device(pa, cfg):
 
     cands = _candidate_devices(pa, cfg.get("device_name_hint", ""))
     log("候选输入设备 %d 个" % len(cands))
-    scored = []
-    for idx, name in cands:
-        peak, median, err = measure_device(pa, idx)
-        scored.append((peak if peak is not None else -1.0,
-                       median if median is not None else 1.0, idx, name, err))
-    # 先剔掉"一直很吵"的设备：那种设备 median 本身就很高（实测有一个恒定 0.58 的），
-    # 拿它当麦克风会把自适应阈值抬到 0.25 上限，于是什么都触发不了。
-    clean = [s for s in scored if s[0] > 0 and s[1] <= 0.05]
-    if clean:
-        scored = clean
-    # 再按"能不能响起来"（rmsMax）排，同分时偏好底噪更干净的（median 更小）。
-    scored.sort(key=lambda r: (r[0], -r[1]), reverse=True)
+
+    # 选麦评分：动态范围（rmsMax - median）。
+    # 为什么不用"最响"：这台机器有一个设备恒定 0.63（坏麦/回授），
+    # 按最响选会选到它，底噪永远 0.6，人声门限被顶到 0.6，她永远听不见。
+    # 真正好的麦克风是「安静时很小、有声音时抬得起来」，即动态范围大。
+    def _scan_once():
+        rows = []
+        for idx, name in cands:
+            peak, median, err = measure_device(pa, idx)
+            rows.append((peak if peak is not None else -1.0,
+                         median if median is not None else 1.0, idx, name, err))
+        return rows
+
+    scored = _scan_once()
+    # 全部"一直很吵"（可能是她正在说话/放音乐）：等两秒重测，最多 3 轮
+    for attempt in range(3):
+        clean = [s for s in scored if s[0] > 0 and s[1] <= 0.05]
+        if clean:
+            scored = clean
+            break
+        log("所有设备底噪都偏高（可能是她正在说话/环境很吵），1.5 秒后重测（%d/3）" % (attempt + 1))
+        time.sleep(1.5)
+        scored = _scan_once()
+    scored.sort(key=lambda r: (r[0] - r[1], -r[1]), reverse=True)
     for peak, median, idx, name, err in scored:
         log("  设备 %2d  %-34s %s" % (
             idx, name[:34],
@@ -1409,9 +1421,15 @@ def pick_loudest_device(pa, exclude=()):
         name = (d.get("name") or "").lower()
         if "立体声混音" in name or "stereo mix" in name or "what u hear" in name:
             continue
-        r = measure_device_rms(pa, i)
-        if r is not None and r > best[1]:
-            best = (i, r)
+        peak, median, err = measure_device(pa, i, 1.0)
+        if peak is None:
+            continue
+        # 同启动选麦：按动态范围挑，避免选到"恒定很吵"的设备
+        if median > 0.30:
+            continue
+        rng = peak - median
+        if rng > best[1]:
+            best = (i, rng)
     return best
 
 
@@ -1636,7 +1654,7 @@ def mic_loop(asr, brain, say_it, vad, context, cfg, device_index, stop_event):
     attach_denoiser(mic, cfg)
     log("麦克风已打开：device=%d 原生 %dch / %d Hz → 16 kHz 单声道  VAD阈值 %.4f"
         % (device_index, mic.channels, mic.rate, getattr(vad, "threshold", 0)))
-    log("语音门限：自适应（跟随房间底噪，约 0.002~0.02；低于此值才算噪声）")
+    log("语音门限：自适应（跟随安静时的底噪，1.7 倍以上才算人声）")
 
     # ── 半双工：说话期间静音麦克风 ────────────────────────
     # 不加这个会形成回声环：她说的话从喇叭出来又被麦克风收进去，
@@ -2127,11 +2145,17 @@ def mic_loop(asr, brain, say_it, vad, context, cfg, device_index, stop_event):
                     _ptt["muted_frames"] = 0
             else:
                 _ptt["was_muted"] = False
-            # 底噪跟踪（慢速 EMA）：门限跟着房间噪声走，固定值要么误杀说话、要么放过噪声
-            # PTT 静音帧不参与底噪统计，否则会把门限越压越低
+            # 底噪跟踪：必须只跟"安静的时候"，否则她说的话、回声、持续噪声
+            # 都会把底噪推高——实测会从 0.08 涨到 0.55，人声门限跟着涨到 0.6，
+            # 结果就是她永远听不见主人说话。
+            # 做法：下降快（跟随安静），上升极慢（声音大时几乎不动）。
             _rms_now = float(np.abs(frame).mean())
             if _ptt["mode"] != "ptt" or not _ptt["was_muted"]:
-                _noise["v"] = _noise["v"] * 0.995 + _rms_now * 0.005
+                if _rms_now < _noise["v"]:
+                    _noise["v"] = _noise["v"] * 0.90 + _rms_now * 0.10
+                else:
+                    _noise["v"] = _noise["v"] * 0.9995 + _rms_now * 0.0005
+                _noise["v"] = min(_noise["v"], 0.30)   # 再高的"底噪"多半是回声/持续噪声
             utt = vad.process(frame)
 
             # 电平门限：挡掉「明显低于/等于环境噪声」的片段。
@@ -2139,7 +2163,7 @@ def mic_loop(asr, brain, say_it, vad, context, cfg, device_index, stop_event):
             # 宽带白噪声），所有噪声片段都会通过 → 每段都跑一次 ASR → 识别为空、
             # CPU 白烧，而真正的人声反而被噪声淹没。
             # 改成跟着底噪走：必须明显高于底噪（1.7 倍）才算人声。
-            LEVEL_FLOOR = max(0.0022, min(0.6, _noise["v"] * 1.7))
+            LEVEL_FLOOR = max(0.0022, min(0.28, _noise["v"] * 1.7))
             if utt and float(utt.get("level") or 0) < LEVEL_FLOOR:
                 log("（%.1f 秒片段电平 %.4f < 门限 %.4f（底噪 %.4f），判定噪声丢弃）"
                     % (utt.get("ms", 0) / 1000.0, float(utt.get("level") or 0),
