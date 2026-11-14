@@ -27,9 +27,9 @@ import urllib.error
 import urllib.request
 
 BASE = "http://127.0.0.1:5011"
-SHELL_LOG = os.path.join(APP_DIR, "pet-shell.log")
-MAIN_JS = os.path.join(APP_DIR, "main.js")
-BRIDGE_LOG = os.path.join(BRAIN_DIR, "logs", "voice_bridge.log")
+SHELL_LOG = r"C:\ai-pet-live2d\pet-shell\pet-shell.log"
+MAIN_JS = r"C:\ai-pet-live2d\pet-shell\main.js"
+BRIDGE_LOG = r"C:\Users\Administrator\Documents\deepseek-harness\default-workspace\dafeiyu-pet\logs\voice_bridge.log"
 
 user32 = ctypes.windll.user32
 
@@ -50,8 +50,14 @@ def ev(js, timeout=25):
 
 
 def find_window(title_part):
-    """按标题找可见窗口句柄"""
-    result = []
+    """按标题找可见窗口句柄。
+
+    优先**完全相等**再退化为包含：设置窗口的标题是「大肥鱼 · 设置」，
+    以前用包含匹配会把设置窗口当成桌宠本体，B1/F6 就会拿到错的窗口尺寸
+    （实测：设置窗口开着时 B1 读到 900 宽、滚轮怎么滚都不变 → 误报失败）。
+    """
+    exact = []
+    partial = []
 
     @ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
     def cb(hwnd, _):
@@ -62,13 +68,17 @@ def find_window(title_part):
             return True
         buf = ctypes.create_unicode_buffer(n + 1)
         user32.GetWindowTextW(hwnd, buf, n + 1)
-        if title_part in buf.value:
-            result.append(hwnd)
+        if buf.value == title_part:
+            exact.append(hwnd)
             return False
+        if title_part in buf.value:
+            partial.append(hwnd)
         return True
 
     user32.EnumWindows(cb, 0)
-    return result[0] if result else None
+    if exact:
+        return exact[0]
+    return partial[0] if partial else None
 
 
 def window_rect(hwnd):
@@ -359,7 +369,7 @@ def main():
         r.check("E3", "设置窗口能关闭", e3)
 
         def e4():
-            html = open(os.path.join(APP_DIR, "settings.html"), encoding="utf-8").read()
+            html = open(r"C:\ai-pet-live2d\pet-shell\settings.html", encoding="utf-8").read()
             ok = "window.petSettings.close()" in html and "900" in html
             return ok, "保存后自动关闭已实现" if ok else "保存后不会自动关闭"
         r.check("E4", "保存后自动关闭", e4)

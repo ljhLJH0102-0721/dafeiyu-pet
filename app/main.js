@@ -926,18 +926,24 @@ let lastHitBody = false;   // 上一次命中检测是否落在她身上
  * 能被抓住（用户体感：放大缩小后拖不动一小会）。
  */
 function noteResizeCooldown() {
-  skipUntil = Date.now() + 180;   // 90ms 一个 tick，跳过 2 个就够
+  skipUntil = Date.now() + 260;   // 90ms 一个 tick，跳过 2~3 个
   lastHitAt = 0;                  // 冷却一结束马上测
   lastCursor = { x: -1, y: -1 };
   try {
     if (!win || win.isDestroyed()) return;
     const b = win.getBounds();
     const p = screen.getCursorScreenPoint();
-    if (lastHitBody && p.x >= b.x && p.x < b.x + b.width && p.y >= b.y && p.y < b.y + b.height) {
-      // 只有"上一次命中确实在她身上"才强制可交互。
-      // 光标在窗口透明区域时强制可交互会让她变成一块挡板（回归用例 C1 抓到的问题）。
-      applyIgnore(false, true);
-    }
+    const inside = p.x >= b.x && p.x < b.x + b.width && p.y >= b.y && p.y < b.y + b.height;
+    // 缩放瞬间光标一般就在她身上（滚轮/快捷键都是在看她的时候按的）。
+    // 这一小段先给"可交互"，否则缩放后立刻去抓她会抓到桌面（体感：拖不起来）。
+    if (inside) applyIgnore(false, true);
+    // 冷却结束强制重测一次，恢复正确的穿透状态
+    // （否则光标在透明区时会一直保持可交互，变成挡板 —— 回归 C1 会抓到）
+    setTimeout(() => {
+      forceNextHit = true;
+      lastHitAt = 0;
+      lastCursor = { x: -1, y: -1 };
+    }, 280);
   } catch (e) {}
 }
 let forceNextHit = false;   // 刚唤回时：第一次检测结果直接生效，不等防抖              // 窗口正在改尺寸的这段时间不做命中检测
@@ -1004,8 +1010,10 @@ function startHitTestLoop() {
     const moved = p.x !== lastCursor.x || p.y !== lastCursor.y;
     // 关键修复：以前「光标不动就 return」，导致状态永久冻结在"接收鼠标"，
     // 结果是窗口变成一块挡板，她周围的东西全点不了。
-    // 现在即使光标不动，也每 700ms 复测一次（readPixels 会打断 GPU 流水线）。
-    if (!moved && Date.now() - lastHitAt < 700) return;
+    // 现在即使光标不动也定期复测：窗口刚缩放完的那一下，页面还没按新尺寸重画，
+    // 立即测会读到旧/空的像素 → 判成"不在她身上"→ 变点击穿透，光标不动就一直错下去
+    // （用户体感：缩放后手不挪直接点她，拖不起来）。所以间隔改短到 260ms。
+    if (!moved && Date.now() - lastHitAt < 260) return;
     if (moved) lastCursor = { x: p.x, y: p.y };
     lastHitAt = Date.now();
 

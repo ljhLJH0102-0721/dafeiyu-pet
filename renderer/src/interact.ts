@@ -149,6 +149,7 @@ export function setupInteraction(): void {
 
   // ── 全屏漫游：窗口铺满屏幕，拖动移动的是角色（画布位移），不是窗口 ──
   let roamMode = false;
+  let prevRoamMode = false;   // 上一次的漫游状态（只在真正切换时重置缩放）
   let roamOffset = { x: 0, y: 0 };
   let roamDrag: { sx: number; sy: number; ox: number; oy: number } | null = null;
   const ROAM_KEY = 'pet.roam.offset';
@@ -222,10 +223,13 @@ export function setupInteraction(): void {
             const z = window.localStorage.getItem('pet.roam.zoom');
             if (z) fit.setZoom(Number(z));
           } catch (e) {}
-        } else {
-          // 回普通模式：窗口自己缩放，角色倍率复位
+        } else if (prevRoamMode) {
+          // 只有真正从「漫游」切回「普通」时才复位缩放。
+          // 以前每次保存设置都会执行这一句 → 她先被放大（zoom=1），
+          // 紧接着被贴边保险缩回去，用户看到的就是"保存后突然变大又缩回去"。
           try { fit.setZoom(1); window.localStorage.setItem('pet.roam.zoom', '1'); } catch (e) {}
         }
+        prevRoamMode = roamMode;
         if (!roamMode) {
           // 非漫游：位移一律清零（否则她会跑到小窗口外面去）
           roamOffset = { x: 0, y: 0 };
