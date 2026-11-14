@@ -904,6 +904,7 @@ let lastTopmostCheck = 0;   // 上次确认置顶的时间
 let lastHitAt = 0;      // 上次命中检测时间（光标静止也要复测）
 let hitToken = 0;       // 丢弃过期的异步结果
 let skipUntil = 0;
+let lastHitBody = false;   // 上一次命中检测是否落在她身上
 
 /**
  * 窗口尺寸刚变过：短暂跳过命中检测（避免穿透状态抖动），
@@ -921,8 +922,10 @@ function noteResizeCooldown() {
     if (!win || win.isDestroyed()) return;
     const b = win.getBounds();
     const p = screen.getCursorScreenPoint();
-    if (p.x >= b.x && p.x < b.x + b.width && p.y >= b.y && p.y < b.y + b.height) {
-      applyIgnore(false, true);   // 光标在窗口里 → 先可交互，抓得住
+    if (lastHitBody && p.x >= b.x && p.x < b.x + b.width && p.y >= b.y && p.y < b.y + b.height) {
+      // 只有"上一次命中确实在她身上"才强制可交互。
+      // 光标在窗口透明区域时强制可交互会让她变成一块挡板（回归用例 C1 抓到的问题）。
+      applyIgnore(false, true);
     }
   } catch (e) {}
 }
@@ -1010,6 +1013,7 @@ function startHitTestLoop() {
         //   命中（光标确实落在她身上）→ 立刻切成可交互，否则用户一按下就落到桌面上；
         //   落空（透明处）→ 仍然防抖两次，避免边界抖动导致窗口状态来回闪。
         forceNextHit = false;
+        lastHitBody = !!hit;
         applyIgnore(!hit, !!hit);
       })
       .catch(() => {
