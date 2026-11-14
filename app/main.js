@@ -603,6 +603,8 @@ function buildMenuData() {
       { id: 'hello', label: '打个招呼', icon: '👋' },
       { id: 'pat', label: '摸摸头', icon: '♡' },
       { sep: true },
+      { id: 'miccheck', label: '麦克风自检', icon: '🎤' },
+      { sep: true },
       { id: 'g-exp', label: '表情', icon: '', chips: EXPRESSIONS.map((n) => ({ id: 'exp:' + n, label: n })) },
       { id: 'g-mot', label: '动作', icon: '', chips: MOTIONS.map((n) => ({ id: 'mot:' + n, label: n })) },
       { sep: true },
@@ -632,6 +634,15 @@ function speak(text) {
 }
 
 function handleMenuAction(id) {
+  if (id === 'miccheck') {
+    // 麦克风自检：让语音桥录 5 秒，分析完用她的话报告结果
+    try {
+      const p = path.join(settingsStore.PET_DIR, 'command.txt');
+      fs.writeFileSync(p, 'MICCHECK:', 'utf8');
+      log('[miccheck] 已请求麦克风自检');
+    } catch (e) { log('[miccheck] 写入失败', String(e)); }
+    return;
+  }
   if (id === 'workshop') {
     openWorkshop();
     return;

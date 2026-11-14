@@ -93,6 +93,9 @@ _ROUTE_CACHE = {"v": None}      # 打字通道只探测一次就定下来（每�
 # 前台窗口状态：exe / title / 进入时间（提示词和窗口线程共用）
 _win_state = {"exe": "", "title": "", "since": 0.0}
 
+# 麦克风自检：记录几秒原始音频（右键菜单「麦克风自检」用）
+_miccheck = {"until": 0.0, "frames": []}
+
 
 def _type_route():
     """打字走哪条：inject（系统注入，打进当前焦点窗口）或 plugin（写 DSH 输入框）。"""
@@ -912,9 +915,9 @@ class SileroSegmenter:
                 return
             cfgv = so.VadModelConfig()
             cfgv.silero_vad.model = model
-            cfgv.silero_vad.threshold = float(os.environ.get("PET_VAD_THRESHOLD", "0.35"))
-            cfgv.silero_vad.min_silence_duration = float(os.environ.get("PET_VAD_TAIL", "0.45"))
-            cfgv.silero_vad.min_speech_duration = float(os.environ.get("PET_VAD_MIN", "0.25"))
+            cfgv.silero_vad.threshold = float(os.environ.get("PET_VAD_THRESHOLD", "0.30"))
+            cfgv.silero_vad.min_silence_duration = float(os.environ.get("PET_VAD_TAIL", "0.40"))
+            cfgv.silero_vad.min_speech_duration = float(os.environ.get("PET_VAD_MIN", "0.18"))
             cfgv.silero_vad.window_size = 512
             cfgv.sample_rate = SAMPLE_RATE
             cfgv.num_threads = 1
@@ -1643,6 +1646,48 @@ def window_loop(stop_event, say_it):
         stop_event.wait(4)
 
 
+def miccheck_report(samples, say_it):
+    """分析一段录音并给出人话结论：她听不听得见、环境吵不吵。"""
+    try:
+        import numpy as _np
+        if samples is None or len(samples) < SAMPLE_RATE * 0.5:
+            say_it("我这边没录到声音。")
+            return
+        x = _np.asarray(samples, dtype=_np.float32)
+        win = int(SAMPLE_RATE * 0.25)
+        levels = []
+        for i in range(0, max(1, len(x) - win), win):
+            seg = x[i:i + win]
+            levels.append(float(_np.sqrt(_np.mean(seg * seg))))
+        levels.sort()
+        floor = levels[max(0, int(len(levels) * 0.1))] if levels else 0.0
+        p95 = levels[int(len(levels) * 0.95) - 1] if len(levels) > 20 else (levels[-1] if levels else 0.0)
+        peak = max(levels) if levels else 0.0
+        ratio = (p95 / floor) if floor > 1e-6 else 0.0
+        log("麦克风自检：底噪 %.4f  强峰 %.4f  最大 %.4f  起伏 %.1f 倍" % (floor, p95, peak, ratio))
+        cfg = load_config()
+        den = segment_denoise(normalize_peak(x, cfg.get("agc_target_peak", 0.7)), cfg)
+        try:
+            asr = DualAsr(("zh",))
+            raw_txt = asr.transcribe(normalize_peak(x, 0.7))["text"]
+            den_txt = asr.transcribe(den)["text"]
+        except Exception as exc:
+            raw_txt, den_txt = "", ""
+            log("自检转写失败：%s" % exc)
+        log("自检转写：原声 %r / 降噪 %r" % (raw_txt, den_txt))
+        if floor > 0.08:
+            say_it("环境有点吵，我听着费劲。要不要关一下风扇或者凑近点？")
+        elif ratio < 1.3 and not (raw_txt or den_txt):
+            say_it("我这边几乎听不到你说话，检查一下麦克风有没有被静音？")
+        elif not (raw_txt or den_txt):
+            say_it("听到了些动静，但没听清你说什么。再说一次试试？")
+        else:
+            say_it("我听得见！你说的是：%s" % (den_txt or raw_txt))
+    except Exception as exc:
+        log("麦克风自检出错：%s" % exc)
+
+
+
 def mic_loop(asr, brain, say_it, vad, context, cfg, device_index, stop_event):
     silero_gate = SileroGate()
     # 已经在用 Silero 切段了，不要再拿 Silero 二次过滤（阈值不同会互相打架）
@@ -1683,7 +1728,8 @@ def mic_loop(asr, brain, say_it, vad, context, cfg, device_index, stop_event):
     dictation = {"until": 0.0}
     _auto_state = {"next_probe": 0.0, "last_speech": time.monotonic()}   # 自动换麦用
     _mic_state = {"fails": 0, "silent_since": 0.0}   # 麦克风自愈：读取失败计数 / 全零起始时间
-    _noise = {"v": 0.004}   # 房间底噪（慢速 EMA），用于自适应电平门限
+    _noise = {"v": 0.004}
+
     # 按键说话（PTT）状态：mode = auto / ptt；vk 来自配置里的 ptt_key
     _ptt = {"mode": "auto", "vk": 0, "was_muted": False, "muted_frames": 0, "open_until": 0.0, "flag_mtime": None,
             "cfg_at": 0.0, "cfg_mtime": None}
@@ -1920,6 +1966,18 @@ def mic_loop(asr, brain, say_it, vad, context, cfg, device_index, stop_event):
                     continue
                 result = asr.transcribe(samples)
                 if not result["text"]:
+                    # 降噪有可能把轻声的字也压掉：识别不出来就拿原声再试一次。
+                    # 只在失败时多花一次 ASR，平时没有额外开销。
+                    raw_samples = normalize_peak(item["samples"], cfg["agc_target_peak"])
+                    if raw_samples is not samples:
+                        try:
+                            alt = asr.transcribe(raw_samples)
+                            if alt.get("text"):
+                                log("（降噪版没识别出来，用原声重试成功）")
+                                result = alt
+                        except Exception:
+                            pass
+                if not result["text"]:
                     log("（%d ms 音频没识别出内容，电平 %.4f）" % (item["ms"], item.get("level", 0)))
                     continue
                 log("听到：%r  [选 %s %s]  %d ms 解码  电平 %.3f  时长 %d ms" % (
@@ -1985,6 +2043,11 @@ def mic_loop(asr, brain, say_it, vad, context, cfg, device_index, stop_event):
                                 news_once(say_it)
                             except Exception as exc:
                                 log("新闻触发失败：%s" % exc)
+                        elif text.startswith("MICCHECK:"):
+                            # 麦克风自检：接下来 5 秒的音频拿去分析，然后用她的话报告
+                            _miccheck["until"] = time.time() + 5.0
+                            _miccheck["frames"] = []
+                            log("麦克风自检开始：录 5 秒")
                         elif text.startswith("SAY:"):
                             # 直接朗读固定台词（不经过大脑，不消耗 token）
                             # 用途：右键菜单的「打个招呼」「摸摸头」这类互动语音
@@ -2056,6 +2119,18 @@ def mic_loop(asr, brain, say_it, vad, context, cfg, device_index, stop_event):
             try:
                 frame = mic.read_frame()
                 _mic_state["fails"] = 0
+                # 自检收集（只在这 5 秒内）
+                if _miccheck["until"] > 0.0:
+                    _miccheck["frames"].append(frame.copy())
+                    if time.time() >= _miccheck["until"]:
+                        _miccheck["until"] = 0.0
+                        _buf = _miccheck["frames"]
+                        _miccheck["frames"] = []
+                        try:
+                            _all = np.concatenate(_buf) if _buf else None
+                        except Exception:
+                            _all = None
+                        threading.Thread(target=miccheck_report, args=(_all, say_it), daemon=True).start()
             except Exception as exc:
                 _mic_state["fails"] += 1
                 log("麦克风读取失败（第 %d 次）：%s" % (_mic_state["fails"], exc))
@@ -2105,7 +2180,7 @@ def mic_loop(asr, brain, say_it, vad, context, cfg, device_index, stop_event):
                 _beat["at"] = _now_beat
                 log("心跳：麦克风峰值 %.4f（60s 内）设备 %s  底噪 %.4f  人声门限 %.4f" % (
                     _beat["peak"], getattr(mic, "index", "?"),
-                    _noise.get("v", 0.0), max(0.0022, min(0.6, _noise.get("v", 0.0) * 1.7))))
+                    _noise.get("v", 0.0), max(0.0022, min(0.22, _noise.get("v", 0.0) * 1.35))))
                 # 麦克风看门狗：连续几分钟一点声音都没有就用人话提醒一次。
                 # 系统层面静音（硬件静音键 / 被别的程序占着）时，光有日志没人会去看。
                 if _beat["peak"] < 0.002:
@@ -2163,7 +2238,7 @@ def mic_loop(asr, brain, say_it, vad, context, cfg, device_index, stop_event):
             # 宽带白噪声），所有噪声片段都会通过 → 每段都跑一次 ASR → 识别为空、
             # CPU 白烧，而真正的人声反而被噪声淹没。
             # 改成跟着底噪走：必须明显高于底噪（1.7 倍）才算人声。
-            LEVEL_FLOOR = max(0.0022, min(0.28, _noise["v"] * 1.7))
+            LEVEL_FLOOR = max(0.0022, min(0.22, _noise["v"] * 1.35))
             if utt and float(utt.get("level") or 0) < LEVEL_FLOOR:
                 log("（%.1f 秒片段电平 %.4f < 门限 %.4f（底噪 %.4f），判定噪声丢弃）"
                     % (utt.get("ms", 0) / 1000.0, float(utt.get("level") or 0),
