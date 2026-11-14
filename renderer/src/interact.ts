@@ -639,6 +639,7 @@ export function setupInteraction(): void {
   // 给外壳/语音桥用：让桌宠做个小反应
   //   kind: 'surprise' | 'happy' | 'nod' | 'shake' | 'sleep' | 'wake'
   (window as any).__autoFit = () => fit.autoFit();
+  (window as any).__ensureVisible = () => fit.ensureVisible();
 
   // 启动时先藏住画布：自动适配过程中会先把角色缩到 20% 去量尺寸，
   // 不藏的话会看到"一闪"。适配完再淡入。
@@ -860,6 +861,8 @@ export function setupInteraction(): void {
         // 漫游模式：窗口铺满屏幕不能改大小，滚轮缩放的是**角色本身**
         const z = fit.zoomBy(f);
         try { window.localStorage.setItem('pet.roam.zoom', String(z)); } catch (e) {}
+        // 放大到头不能被切头切脚
+        try { fit.ensureVisible(); } catch (e) {}
       } else if (b.scaleBy) {
         b.scaleBy(f);
       }
@@ -893,6 +896,9 @@ export function setupInteraction(): void {
   );
 
   // 窗口尺寸变了 → 按比例缩放上一次的适配结果（瞬间完成，不重新扫描、不闪）
+  // 然后做一次「贴边保险」：等比换算在数学上没错，但窗口拉到很大时，
+  // 上一次的基准 + 当前姿势可能让她顶到边（用户看到的"头和脚被裁掉"）。
+  let ensureTimer = 0;
   window.addEventListener('resize', () => {
     // 只做等比换算，绝不重扫：autoFit 的测量过程会先把模型缩到 20% 扫 3136 个像素，
     // 肉眼就是「她突然变小又弹回来」。等比换算在数学上是精确的（投影随画布高度等比缩放）。
@@ -900,7 +906,15 @@ export function setupInteraction(): void {
     if (!fit.rescaleForWindow()) {
       fit.autoFit();
     }
+    // 尺寸稳定 350ms 后再检查一次有没有贴边（拖动缩放时连续触发，先防抖）
+    if (ensureTimer) window.clearTimeout(ensureTimer);
+    ensureTimer = window.setTimeout(() => {
+      ensureTimer = 0;
+      try { fit.ensureVisible(); } catch (e) {}
+    }, 350);
   });
+  // 启动时也检查一次（缓存里的适配结果可能来自更小的窗口）
+  window.setTimeout(() => { try { fit.ensureVisible(); } catch (e) {} }, 1200);
 
   // 给外壳/语音桥用：让桌宠做个小反应
   (window as any).__react = (kind: string): boolean => {

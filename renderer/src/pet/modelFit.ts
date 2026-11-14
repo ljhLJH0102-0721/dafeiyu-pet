@@ -52,6 +52,11 @@ export interface ModelFit {
   getScale(): number | null;
   /** 角色缩放（漫游模式滚轮用），返回新倍率 */
   zoomBy(factor: number): number;
+  /**
+   * 贴边保险：测一下四条边到她的距离，太近就自己缩一点。
+   * 解决"窗口放到最大时头和脚被裁掉"。
+   */
+  ensureVisible(): Promise<boolean>;
   getZoom(): number;
   setZoom(value: number): number;
   /** 模型矩阵是否已就绪 */
@@ -288,6 +293,80 @@ export function createModelFit(deps: ModelFitDeps): ModelFit {
     return a && a.length ? a[0] : null;
   }
 
+  /**
+   * 四条边到她的距离（px）。沿中线往里走，找到第一个不透明像素就停。
+   * 比整张网格扫描便宜得多（几十次 readPixels 而不是三千多次）。
+   */
+  function probeEdges(): { top: number; bottom: number; left: number; right: number } | null {
+    let W = 0, H = 0;
+    try {
+      const rect = deps.getCanvas().getBoundingClientRect();
+      W = Math.round(rect.width);
+      H = Math.round(rect.height);
+    } catch (e) {
+      return null;
+    }
+    if (W < 40 || H < 40) return null;
+    const step = Math.max(2, Math.round(Math.min(W, H) / 160));
+    const on = deps.isOnCharacter;
+
+    // 上：沿中线（略偏左/右各试一条，避开中间可能有空隙的地方）
+    let top = H;
+    for (let y = 0; y < H; y += step) {
+      let hit = false;
+      for (const fx of [0.5, 0.42, 0.58]) {
+        if (on(W * fx, y)) { hit = true; break; }
+      }
+      if (hit) { top = y; break; }
+    }
+    let bottom = H;
+    for (let y = H - 1; y >= 0; y -= step) {
+      let hit = false;
+      for (const fx of [0.5, 0.42, 0.58]) {
+        if (on(W * fx, y)) { hit = true; break; }
+      }
+      if (hit) { bottom = H - 1 - y; break; }
+    }
+    let left = W;
+    for (let x = 0; x < W; x += step) {
+      let hit = false;
+      for (const fy of [0.5, 0.4, 0.6]) {
+        if (on(x, H * fy)) { hit = true; break; }
+      }
+      if (hit) { left = x; break; }
+    }
+    let right = W;
+    for (let x = W - 1; x >= 0; x -= step) {
+      let hit = false;
+      for (const fy of [0.5, 0.4, 0.6]) {
+        if (on(x, H * fy)) { hit = true; break; }
+      }
+      if (hit) { right = W - 1 - x; break; }
+    }
+    return { top, bottom, left, right };
+  }
+
+  /**
+   * 贴边保险：她离哪条边太近（或已经出界），就把 zoom 缩一点再测，最多 6 次。
+   * 触发场景：窗口拉到最大、滚轮放大过头、换尺寸后换算偏差。
+   */
+  async function ensureVisible(): Promise<boolean> {
+    if (!fitRef) return false;
+    const margin = Math.max(8, Math.round((deps.getCanvas().getBoundingClientRect().height || 200) * 0.012));
+    for (let i = 0; i < 6; i++) {
+      await raf();
+      const e = probeEdges();
+      if (!e) return false;
+      const need = Math.min(e.top, e.bottom, e.left, e.right);
+      if (need >= margin) return true;
+      // 已经缩到最小还是贴边：认了，别无限缩
+      if (zoom <= 0.36) return false;
+      zoom = Math.max(0.35, zoom * 0.92);
+      applyFitInner(fitRef);
+    }
+    return true;
+  }
+
   /** 模型矩阵是否已就绪 */
   function isReady(): boolean {
     return !!matrix();
@@ -301,5 +380,5 @@ export function createModelFit(deps: ModelFitDeps): ModelFit {
     fitRef = null;
   }
 
-  return { autoFit, rescaleForWindow, applyFit, getRef, getScale, isReady, invalidate, zoomBy, getZoom, setZoom };
+  return { autoFit, rescaleForWindow, applyFit, getRef, getScale, isReady, invalidate, zoomBy, ensureVisible, getZoom, setZoom };
 }
