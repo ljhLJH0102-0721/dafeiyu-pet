@@ -766,8 +766,8 @@ export function setupInteraction(): void {
 
   // 做一个短表情，几秒后收回去
   // 加冷却：表情太频繁地切会闪、也会把语音挑的表情和菜单点的表情互相顶掉
-  const EXPR_CD_SAME = 1400;   // 同一个表情，1.4 秒内重复触发直接忽略
-  const EXPR_CD_ANY = 500;     // 任意两个表情之间至少隔 0.5 秒
+  const EXPR_CD_SAME = 1500;   // 同一个表情，1.5 秒内重复触发直接忽略
+  const EXPR_CD_ANY = 1500;    // 任意两个表情之间至少隔 1.5 秒（连续点不会切个不停）
   const EXPR_MERGE_MS = 400;   // 不到 0.4 秒又切，合并成最后一次（不来回闪）
   let lastExprName = '';
   let lastExprAt = 0;
