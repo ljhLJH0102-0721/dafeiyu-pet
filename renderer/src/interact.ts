@@ -906,12 +906,12 @@ export function setupInteraction(): void {
     if (!fit.rescaleForWindow()) {
       fit.autoFit();
     }
-    // 尺寸稳定 350ms 后再检查一次有没有贴边（拖动缩放时连续触发，先防抖）
+    // 尺寸稳定 550ms 后再检查一次有没有贴边（滚轮连续缩放时先别插进来，免得卡）
     if (ensureTimer) window.clearTimeout(ensureTimer);
     ensureTimer = window.setTimeout(() => {
       ensureTimer = 0;
       try { fit.ensureVisible(); } catch (e) {}
-    }, 350);
+    }, 550);
   });
   // 启动时也检查一次（缓存里的适配结果可能来自更小的窗口）
   window.setTimeout(() => { try { fit.ensureVisible(); } catch (e) {} }, 1200);

@@ -2148,7 +2148,13 @@ def main():
         Say()(args.say)
         return
 
-    asr = DualAsr()
+    # 双识别器（粤语 + 普通话）会各占一份模型内存（实测多 250~300MB），
+    # 而且只有粤语口音重的时候才用得上。默认只加载普通话，
+    # 需要时把 voice_bridge.json 的 asr_dual 设成 true。
+    _dual = bool(cfg.get("asr_dual", False))
+    asr = DualAsr(("yue", "zh") if _dual else ("zh",))
+    if not _dual:
+        log("ASR 单识别器模式（普通话）；需要粤语双解码把 asr_dual 设为 true")
 
     if args.wav:
         r = asr.transcribe_file(args.wav)
@@ -2195,7 +2201,13 @@ def main():
     except Exception:
         pass
 
-    asr = DualAsr()
+    # 双识别器（粤语 + 普通话）会各占一份模型内存（实测多 250~300MB），
+    # 而且只有粤语口音重的时候才用得上。默认只加载普通话，
+    # 需要时把 voice_bridge.json 的 asr_dual 设成 true。
+    _dual = bool(cfg.get("asr_dual", False))
+    asr = DualAsr(("yue", "zh") if _dual else ("zh",))
+    if not _dual:
+        log("ASR 单识别器模式（普通话）；需要粤语双解码把 asr_dual 设为 true")
     try:
         ok, err = desktop.input_allowed()
         if ok:

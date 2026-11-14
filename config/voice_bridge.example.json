@@ -47,5 +47,6 @@
     "动画"
   ],
   "window_watch": true,
-  "window_cooldown_min": 20
+  "window_cooldown_min": 20,
+  "asr_dual": false
 }
