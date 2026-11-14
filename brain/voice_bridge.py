@@ -569,6 +569,123 @@ def resample_to_16k(x, src_rate, target=SAMPLE_RATE):
     return np.interp(np.linspace(0, len(x) - 1, n), np.arange(len(x)), x).astype(np.float32)
 
 
+
+_OFFLINE_DEN = {"obj": None, "tried": False}
+
+
+def segment_denoise(samples, cfg):
+    """对一段语音做离线降噪（GTCRN）。只在有人说话时才跑，平时不耗 CPU。
+
+    流式降噪会让 CPU 常驻 100~200%（每 16ms 一次推理）；
+    段级是每次说话才跑一次，代价可以忽略。
+    """
+    if cfg.get("denoise", "segment") in (False, "off", "none"):
+        return samples
+    try:
+        if not _OFFLINE_DEN["tried"]:
+            _OFFLINE_DEN["tried"] = True
+            import sherpa_onnx as so
+            model = os.path.join(HERE, "denoise", "gtcrn_simple.onnx")
+            if not os.path.exists(model):
+                log("段级降噪：模型不存在，跳过")
+                return samples
+            c = so.OfflineSpeechDenoiserConfig()
+            c.model.gtcrn.model = model
+            c.model.num_threads = 2
+            _OFFLINE_DEN["obj"] = so.OfflineSpeechDenoiser(c)
+            log("段级降噪：GTCRN 已就绪（说话时才跑）")
+        den = _OFFLINE_DEN["obj"]
+        if den is None:
+            return samples
+        r = den(samples=samples, sample_rate=SAMPLE_RATE)
+        out = np.asarray(r.samples, dtype=np.float32)
+        if out.size >= SAMPLE_RATE * 0.2:
+            return out
+        return samples
+    except Exception as exc:
+        log("段级降噪失败（用原声）：%s" % exc)
+        _OFFLINE_DEN["obj"] = None
+        return samples
+
+
+def attach_denoiser(mic, cfg):
+    """给麦克风流挂上降噪器（模型存在、且配置开着时才挂）。"""
+    if mic is None:
+        return mic
+    try:
+        mode = cfg.get("denoise", "segment")
+        if mode in (False, "off", "none", None):
+            log("降噪：关闭（denoise=%r）" % mode)
+            return mic
+        if mode != "stream":
+            # 默认只在切出来的语音段上降噪（流式降噪要吃掉 1~2 个 CPU 核心）
+            return mic
+        model = os.path.join(HERE, "denoise", "gtcrn_simple.onnx")
+        if not os.path.exists(model):
+            log("降噪：模型不存在，跳过（%s）" % model)
+            return mic
+        t0 = time.time()
+        mic.denoiser = StreamingDenoiser(model)
+        log("降噪已启用（GTCRN，构建 %d ms，内部 %d Hz / %d 样本一块）" % (
+            (time.time() - t0) * 1000, mic.denoiser.rate, mic.denoiser.chunk))
+    except Exception as exc:
+        log("降噪初始化失败，用原声：%s" % exc)
+        mic.denoiser = None
+    return mic
+
+class StreamingDenoiser:
+    """GTCRN 流式降噪：把环境底噪压掉（实测 20~26 倍），说话声保留。
+
+    为什么需要：这台机器的麦克风底噪常年 0.17 RMS（宽带白噪声，4~8kHz 占 39%），
+    Silero VAD 和 ASR 都被噪声淹没——用户说话她没反应。
+
+    sherpa-onnx 的 OnlineSpeechDenoiser 按 256 样本一块处理，
+    我们攒够一块就喂一次，延迟约 16ms。
+    """
+
+    def __init__(self, model_path, threads=2):
+        import sherpa_onnx as so
+
+        cfg = so.OnlineSpeechDenoiserConfig()
+        cfg.model.gtcrn.model = model_path
+        cfg.model.num_threads = threads
+        self.den = so.OnlineSpeechDenoiser(cfg)
+        self.chunk = int(self.den.frame_shift_in_samples) or 256
+        self.rate = int(self.den.sample_rate) or SAMPLE_RATE
+        self._buf = np.zeros(0, dtype=np.float32)
+        self._carry = np.zeros(0, dtype=np.float32)
+
+    def process(self, x):
+        x = np.asarray(x, dtype=np.float32)
+        if x.size == 0:
+            return x
+        self._buf = np.concatenate([self._buf, x]) if self._buf.size else x
+        outs = []
+        while self._buf.size >= self.chunk:
+            piece = self._buf[: self.chunk]
+            self._buf = self._buf[self.chunk:]
+            r = self.den.run(piece, self.rate)
+            a = np.asarray(r.samples, dtype=np.float32)
+            if a.size:
+                outs.append(a)
+        if not outs:
+            # 还没攒够一块：返回等长静音，调用方按帧累计不会错位太多
+            return np.zeros(x.size, dtype=np.float32)
+        out = np.concatenate(outs)
+        # 长度对齐（多退少补），避免下游帧长抖动
+        if out.size > x.size:
+            self._carry = out[x.size:]
+            out = out[: x.size]
+        elif out.size < x.size:
+            if self._carry.size:
+                add = self._carry[: x.size - out.size]
+                self._carry = self._carry[add.size:]
+                out = np.concatenate([out, add])
+            if out.size < x.size:
+                out = np.concatenate([out, np.zeros(x.size - out.size, dtype=np.float32)])
+        return out
+
+
 class MicStream:
     """按设备**原生**声道数与采样率打开，再自己混成单声道降到 16 kHz。
 
@@ -585,6 +702,8 @@ class MicStream:
         self.rate = int(info["defaultSampleRate"])
         self.chunk = frames_per_buffer
         self._buf = np.zeros(0, dtype=np.float32)
+        # 降噪器：由外层 attach（没有模型时为 None）
+        self.denoiser = None
         self.stream = pa.open(
             format=pyaudio.paInt16, channels=self.channels, rate=self.rate,
             input=True, input_device_index=index, frames_per_buffer=self.chunk,
@@ -617,7 +736,14 @@ class MicStream:
         s = np.frombuffer(raw, dtype=np.int16).astype(np.float32).reshape(-1, self.channels)
         # 只取第 0 声道：阵列麦两声道常相位相反，取平均会互相抵消（电平在、内容毁）
         mono = s[:, 0]
-        return resample_to_16k(mono / 32768.0, self.rate)
+        pcm = resample_to_16k(mono / 32768.0, self.rate)
+        # 降噪（模型缺失 / 出错时自动退化为原声）
+        if self.denoiser is not None:
+            try:
+                pcm = self.denoiser.process(pcm)
+            except Exception:
+                self.denoiser = None
+        return pcm
 
     def read_frame(self, size=FRAME):
         """凑够一帧 16 kHz 单声道样本再返回。"""
@@ -700,6 +826,7 @@ def pick_device(pa, cfg):
 
 def calibrate_ambient(pa, device_index, seconds=3.0):
     """量一段环境噪声，用来定 VAD 阈值。"""
+    # 注意：标定用**原声**（不降噪），这样阈值反映真实底噪；降噪在 mic_loop 里才生效
     mic = MicStream(pa, device_index)
     try:
         frames = [mic.read_frame() for _ in range(int(SAMPLE_RATE / FRAME * seconds))]
@@ -1506,6 +1633,7 @@ def mic_loop(asr, brain, say_it, vad, context, cfg, device_index, stop_event):
         log("切段已用 Silero，关闭二次过滤")
     pa = pyaudio.PyAudio()
     mic = MicStream(pa, device_index)
+    attach_denoiser(mic, cfg)
     log("麦克风已打开：device=%d 原生 %dch / %d Hz → 16 kHz 单声道  VAD阈值 %.4f"
         % (device_index, mic.channels, mic.rate, getattr(vad, "threshold", 0)))
     log("语音门限：自适应（跟随房间底噪，约 0.002~0.02；低于此值才算噪声）")
@@ -1766,6 +1894,8 @@ def mic_loop(asr, brain, say_it, vad, context, cfg, device_index, stop_event):
                 break
             try:
                 samples = normalize_peak(item["samples"], cfg["agc_target_peak"])
+                # 段级降噪：环境底噪 0.17 时 ASR 完全听不到人声，先压掉噪声再识别
+                samples = segment_denoise(samples, cfg)
                 # 先过 Silero VAD：不像人声就直接丢，连 ASR 都不跑（省 CPU、防误触发）
                 if not silero_gate.has_speech(samples):
                     log("（%d ms 判定非人声，已过滤）" % item["ms"])
@@ -1900,6 +2030,7 @@ def mic_loop(asr, brain, say_it, vad, context, cfg, device_index, stop_event):
                                 pass
                             device_index = best_idx
                             mic = MicStream(pa, device_index)
+                            attach_denoiser(mic, cfg)
                             vad = EnergyVad(cfg, ambient=max(best_rms * 0.3, 1e-5))
                     except Exception as exc:
                         log("自动换麦失败：%s" % exc)

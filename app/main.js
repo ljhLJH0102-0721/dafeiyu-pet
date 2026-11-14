@@ -242,7 +242,7 @@ function createWindow() {
   let resizeSaveTimer = null;
   win.on('resize', () => {
     if (!win || win.isDestroyed()) return;
-    skipUntil = Date.now() + 600;   // 缩放期间不做命中检测（否则穿透开关会抖）
+    noteResizeCooldown();
     const r = geo.reconcile(win.getBounds(), { dragging: drag.active });
     if (!r.changed) return;
     if (resizeSaveTimer) clearTimeout(resizeSaveTimer);
@@ -904,6 +904,28 @@ let lastTopmostCheck = 0;   // 上次确认置顶的时间
 let lastHitAt = 0;      // 上次命中检测时间（光标静止也要复测）
 let hitToken = 0;       // 丢弃过期的异步结果
 let skipUntil = 0;
+
+/**
+ * 窗口尺寸刚变过：短暂跳过命中检测（避免穿透状态抖动），
+ * 但别让人干等——光标如果就在她身上，直接给"可交互"，
+ * 冷却结束立刻重测一次。
+ *
+ * 以前这里是 skipUntil = +600ms 且什么都不做：缩放后她要"卡" 0.6 秒才
+ * 能被抓住（用户体感：放大缩小后拖不动一小会）。
+ */
+function noteResizeCooldown() {
+  skipUntil = Date.now() + 180;   // 90ms 一个 tick，跳过 2 个就够
+  lastHitAt = 0;                  // 冷却一结束马上测
+  lastCursor = { x: -1, y: -1 };
+  try {
+    if (!win || win.isDestroyed()) return;
+    const b = win.getBounds();
+    const p = screen.getCursorScreenPoint();
+    if (p.x >= b.x && p.x < b.x + b.width && p.y >= b.y && p.y < b.y + b.height) {
+      applyIgnore(false, true);   // 光标在窗口里 → 先可交互，抓得住
+    }
+  } catch (e) {}
+}
 let forceNextHit = false;   // 刚唤回时：第一次检测结果直接生效，不等防抖              // 窗口正在改尺寸的这段时间不做命中检测
 let lastCursor = { x: -1, y: -1 };
 let ignoreToggles = 0;          // 调试用：切换了多少次
@@ -1003,7 +1025,7 @@ function applySize(w, h) {
   if (!geo) return;
   // 夹取 / 等比 / 位置回拉 / 尺寸落盘，全部交给 windowState（唯一真相）
   if (!geo.setSize(w, h)) return;
-  skipUntil = Date.now() + 600;
+  noteResizeCooldown();
   if (sizeSaveTimer) clearTimeout(sizeSaveTimer);
   sizeSaveTimer = setTimeout(() => {
     try { savePos(); } catch (e) {}
