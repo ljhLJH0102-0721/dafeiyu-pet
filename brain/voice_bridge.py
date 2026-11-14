@@ -2085,8 +2085,9 @@ def mic_loop(asr, brain, say_it, vad, context, cfg, device_index, stop_event):
                     pass
             if _now_beat - _beat["at"] > 60.0:
                 _beat["at"] = _now_beat
-                log("心跳：麦克风峰值 %.4f（60s 内）设备 %s" % (
-                    _beat["peak"], getattr(mic, "index", "?")))
+                log("心跳：麦克风峰值 %.4f（60s 内）设备 %s  底噪 %.4f  人声门限 %.4f" % (
+                    _beat["peak"], getattr(mic, "index", "?"),
+                    _noise.get("v", 0.0), max(0.0022, min(0.6, _noise.get("v", 0.0) * 1.7))))
                 # 麦克风看门狗：连续几分钟一点声音都没有就用人话提醒一次。
                 # 系统层面静音（硬件静音键 / 被别的程序占着）时，光有日志没人会去看。
                 if _beat["peak"] < 0.002:
@@ -2133,14 +2134,16 @@ def mic_loop(asr, brain, say_it, vad, context, cfg, device_index, stop_event):
                 _noise["v"] = _noise["v"] * 0.995 + _rms_now * 0.005
             utt = vad.process(frame)
 
-            # 电平门限：只挡「几乎无声」的幽灵片段。
-            # ⚠️ 这里**不能**用 vad.threshold —— SileroSegmenter 的 threshold 是
-            # Silero 的概率阈值（0.5），不是音量；用它会算出 0.35 的门限，
-            # 把正常说话（0.01~0.07）全部当噪声丢掉（踩过这个坑，表现为"她听不懂我说话"）。
-            LEVEL_FLOOR = min(0.02, max(0.0022, _noise["v"] * 1.5))
+            # 电平门限：挡掉「明显低于/等于环境噪声」的片段。
+            # 以前这里封顶 0.02：房间噪声一旦超过 0.02（这台机器实测 0.08~0.17，
+            # 宽带白噪声），所有噪声片段都会通过 → 每段都跑一次 ASR → 识别为空、
+            # CPU 白烧，而真正的人声反而被噪声淹没。
+            # 改成跟着底噪走：必须明显高于底噪（1.7 倍）才算人声。
+            LEVEL_FLOOR = max(0.0022, min(0.6, _noise["v"] * 1.7))
             if utt and float(utt.get("level") or 0) < LEVEL_FLOOR:
-                log("（%.1f 秒片段电平 %.4f < %.4f，判定噪声丢弃）"
-                    % (utt.get("ms", 0) / 1000.0, float(utt.get("level") or 0), LEVEL_FLOOR))
+                log("（%.1f 秒片段电平 %.4f < 门限 %.4f（底噪 %.4f），判定噪声丢弃）"
+                    % (utt.get("ms", 0) / 1000.0, float(utt.get("level") or 0),
+                       LEVEL_FLOOR, _noise["v"]))
                 utt = None
             flush()
 
