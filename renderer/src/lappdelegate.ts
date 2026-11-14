@@ -100,6 +100,13 @@ export class LAppDelegate {
     this._resizeCanvas();
     this._view.initialize();
     this._view.initializeSprite();
+    // 尺寸一变立刻再画一帧：不然合成器会继续显示"上一帧按新窗口裁剪"的画面，
+    // 看起来就是她身上被切一刀（缩放时最明显）。
+    // 实测：只画一次时，新露出的区域还要 100ms 左右才出内容；补两帧能明显缩短。
+    try { this._view.render(); } catch (e) {}
+    requestAnimationFrame(() => {
+      try { this._view.render(); } catch (e) {}
+    });
   }
 
   /**
@@ -302,8 +309,12 @@ export class LAppDelegate {
     // 所以清晰度不能白送。真要降的话 window.PET_RENDER_DPR = 1。
     const cap = Number((window as any).PET_RENDER_DPR) || 1.25;
     const dpr = Math.min(window.devicePixelRatio || 1, cap);
-    canvas.width = Math.max(1, Math.round(canvas.clientWidth * dpr));
-    canvas.height = Math.max(1, Math.round(canvas.clientHeight * dpr));
+    // resize 事件里 canvas.clientWidth 有时还是旧值（布局没重排完），
+    // 用 window.innerWidth 更准；否则画布和窗口差一帧，缩放时她会被"切"一下。
+    const cw = Math.max(1, Math.round((window.innerWidth || canvas.clientWidth) * dpr));
+    const ch = Math.max(1, Math.round((window.innerHeight || canvas.clientHeight) * dpr));
+    if (canvas.width !== cw) canvas.width = cw;
+    if (canvas.height !== ch) canvas.height = ch;
     gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
   }
 
