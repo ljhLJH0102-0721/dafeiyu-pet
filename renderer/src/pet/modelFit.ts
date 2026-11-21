@@ -72,6 +72,9 @@ const MAX_ATTEMPTS = 5;
 export function createModelFit(deps: ModelFitDeps): ModelFit {
   let fitting = false;
   let zoom = 1;          // 角色缩放倍数（漫游模式里滚轮改的是这个，不是窗口）
+  // 贴边保险的临时修正：只是「这一次」缩一点，不能吃掉用户的 zoom。
+  // 以前直接把 zoom 乘 0.92，结果每次放大都被永久缩小回去（重启 DSH 那种高负载时会误触发）。
+  let fitCorrection = 1;
   let fitRef: FitRef | null = null;
   const targetRatio = deps.targetHeightRatio ?? 0.82;
 
@@ -222,13 +225,16 @@ export function createModelFit(deps: ModelFitDeps): ModelFit {
   }
 
   function applyFitInner(ref: FitRef): void {
-    // 每次应用前夹一次：窗口/画布变了，允许的最大倍率也会变
-    zoom = Math.min(zoom, maxZoomAllowed());
+    // 注意：这里**不要**再把 zoom 夹到 maxZoomAllowed() 里。
+    // 高负载时（例如刚启动 DSH）画布尺寸会滞后，maxZoomAllowed 会短暂算小，
+    // 一夹就把用户的放大永久吃掉 —— 表现就是"放大一下又弹回原来的大小"。
+    // 上限只在用户主动缩放（zoomBy/setZoom）时夹一次。
     const arr = matrix();
     if (!arr) return;
     const a = arr.getArray();
-    a[0] = ref.scale * zoom;
-    a[5] = ref.scale * zoom;
+    const k = zoom * fitCorrection;   // 临时贴边修正，不动用户 zoom
+    a[0] = ref.scale * k;
+    a[5] = ref.scale * k;
     a[12] = ref.tx;
     a[13] = ref.ty;
   }
@@ -240,6 +246,7 @@ export function createModelFit(deps: ModelFitDeps): ModelFit {
 
   function rescaleForWindow(): boolean {
     zoom = Math.min(zoom, maxZoomAllowed());
+    fitCorrection = 1;   // 窗口尺寸变了，贴边情况要重新评估
     const arr = matrix();
     if (!arr || !fitRef) return false;
     // 用 window.innerHeight：resize 瞬间 canvas 的 rect 会滞后，导致算错比例
@@ -248,8 +255,9 @@ export function createModelFit(deps: ModelFitDeps): ModelFit {
     const a = arr.getArray();
     const k = H / fitRef.H;
     // 即使尺寸"变回原值"也要重写矩阵，否则滚轮预览留下的缩放会留在身上（看起来她变小了）
-    a[0] = fitRef.scale * k * zoom;
-    a[5] = fitRef.scale * k * zoom;
+    const kk = zoom * fitCorrection;
+    a[0] = fitRef.scale * k * kk;
+    a[5] = fitRef.scale * k * kk;
     a[12] = fitRef.tx;
     a[13] = fitRef.ty;
     return true;
@@ -269,6 +277,7 @@ export function createModelFit(deps: ModelFitDeps): ModelFit {
   }
 
   function zoomBy(factor: number): number {
+    fitCorrection = 1;
     const next = Math.max(0.35, Math.min(maxZoomAllowed(), zoom * Number(factor || 1)));
     if (Math.abs(next - zoom) < 0.0001) return zoom;
     zoom = next;
@@ -281,6 +290,7 @@ export function createModelFit(deps: ModelFitDeps): ModelFit {
   }
 
   function setZoom(value: number): number {
+    fitCorrection = 1;
     zoom = Math.max(0.35, Math.min(maxZoomAllowed(), Number(value) || 1));
     if (fitRef) applyFitInner(fitRef);
     return zoom;
@@ -353,15 +363,24 @@ export function createModelFit(deps: ModelFitDeps): ModelFit {
   async function ensureVisible(): Promise<boolean> {
     if (!fitRef) return false;
     const margin = Math.max(8, Math.round((deps.getCanvas().getBoundingClientRect().height || 200) * 0.012));
+    // 每次从「不修正」开始，避免修正一层层累积
+    fitCorrection = 1;
+    applyFitInner(fitRef);
     for (let i = 0; i < 6; i++) {
       await raf();
       const e = probeEdges();
       if (!e) return false;
       const need = Math.min(e.top, e.bottom, e.left, e.right);
       if (need >= margin) return true;
-      // 已经缩到最小还是贴边：认了，别无限缩
-      if (zoom <= 0.36) return false;
-      zoom = Math.max(0.35, zoom * 0.92);
+      // 缩到底还是贴边：放弃这次修正，恢复原样
+      if (fitCorrection <= 0.36) {
+        fitCorrection = 1;
+        applyFitInner(fitRef);
+        return false;
+      }
+      // 只改「这一次」的修正系数，绝不动用户的 zoom
+      // （以前直接 zoom *= 0.92：放大时只要被误触发一次，她就永久变小了）
+      fitCorrection = Math.max(0.35, fitCorrection * 0.92);
       applyFitInner(fitRef);
     }
     return true;

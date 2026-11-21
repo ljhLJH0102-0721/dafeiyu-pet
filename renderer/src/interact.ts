@@ -903,6 +903,7 @@ export function setupInteraction(): void {
   // 然后做一次「贴边保险」：等比换算在数学上没错，但窗口拉到很大时，
   // 上一次的基准 + 当前姿势可能让她顶到边（用户看到的"头和脚被裁掉"）。
   let ensureTimer = 0;
+  let lastResizeAt = 0;
   window.addEventListener('resize', () => {
     // 只做等比换算，绝不重扫：autoFit 的测量过程会先把模型缩到 20% 扫 3136 个像素，
     // 肉眼就是「她突然变小又弹回来」。等比换算在数学上是精确的（投影随画布高度等比缩放）。
@@ -911,8 +912,18 @@ export function setupInteraction(): void {
       fit.autoFit();
     }
     // 尺寸稳定 550ms 后再检查一次有没有贴边（滚轮连续缩放时先别插进来，免得卡）
+    lastResizeAt = Date.now();
     if (ensureTimer) window.clearTimeout(ensureTimer);
     ensureTimer = window.setTimeout(() => {
+      // 高负载（例如刚启动 DSH）时 resize 事件会拖后：如果这期间又变过尺寸，
+      // 说明还没稳定，重新等，别在中间插一脚把她缩小。
+      if (Date.now() - lastResizeAt < 450) {
+        ensureTimer = window.setTimeout(() => {
+          ensureTimer = 0;
+          try { fit.ensureVisible(); } catch (e) {}
+        }, 450);
+        return;
+      }
       ensureTimer = 0;
       try { fit.ensureVisible(); } catch (e) {}
     }, 550);
