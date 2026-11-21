@@ -83,10 +83,22 @@ export function stepSway(
 export function computePose(input: PoseInput): PoseParams {
   const { t, gazeX, gazeY, onChar, surprise, sleepy, swayX, gesture, twist } = input;
 
+  // ── 有机漂移：别让待机动作按秒表重复 ─────────────────────
+  // 以前的慢摆全是固定频率（0.55 / 0.82 / 1.15 Hz），每隔几秒就精确重复一遍，
+  // 看久了有"机器人感"。这里叠三个互不成整数比的超低频，得到一条永不重复的慢曲线，
+  // 只用来轻微调制幅度和相位（幅度很小，不会看出"在变"）。
+  const drift =
+    Math.sin(t * 0.11 + 0.7) * 0.55 +
+    Math.sin(t * 0.173 + 2.3) * 0.30 +
+    Math.sin(t * 0.071 + 4.1) * 0.15;
+  // 重心转移：约 40 秒一个来回，用 tanh 压成"在一边停一会儿再慢慢换边"
+  const weightShift = Math.tanh(Math.sin(t * 0.075) * 2.4);
+
   // 待机摆动：鼠标跟着她时幅度小一点
   const idleAmp = onChar ? 0.6 : 1.0;
-  const idleX = Math.sin(t * 0.9) * 2.2 * idleAmp;
-  const idleZ = Math.sin(t * 0.63 + 1.1) * 1.6 * idleAmp;
+  const idleAmpEff = idleAmp * (0.9 + 0.1 * drift);
+  const idleX = Math.sin(t * 0.9 + drift * 0.35) * 2.2 * idleAmpEff;
+  const idleZ = (Math.sin(t * 0.63 + 1.1 + drift * 0.3) * 1.6 + weightShift * 1.1) * idleAmpEff;
 
   const g = gesture;
   const params: PoseParams = {};
@@ -135,16 +147,18 @@ export function computePose(input: PoseInput): PoseParams {
   // 所以默认状态下裙子、尾巴一动不动。这里直接给它们加呼吸感的慢摆，
   // 参数写在 paramHold 里 → 在模型 update 之前套用，会盖掉 physics 的 0 值。
   // 幅度都压得很小，避免看起来像在抽搐。
-  const slow1 = Math.sin(t * 0.55);
-  const slow2 = Math.sin(t * 0.82 + 1.3);
+
+  const slow1 = Math.sin(t * 0.55 + drift * 0.35);
+  const slow2 = Math.sin(t * 0.82 + 1.3 + drift * 0.25);
   const slow3 = Math.sin(t * 1.15 + 2.1);
   const breathe = Math.sin(t * 1.6);
   const move = Math.max(-1, Math.min(1, swayX / 6)) * 0.6;   // 被拖动时的惯性
 
-  // 胯：轻微重心变化（角度单位是度，范围 ±30）
-  params['HipAngleX'] = (slow1 * 4.2 + move * 5.0) * idleAmp;
-  params['HipAngleZ'] = (slow2 * 3.0 + move * 2.5) * idleAmp;
-  params['HipAngleYDOWN'] = (breathe * 0.6) * idleAmp;
+  // 胯：轻微重心变化（角度单位是度，范围 ±30）；再叠一点重心转移，
+  // 让她过一会儿偏向一边、再慢慢换回来（这是"活着"最明显的信号）
+  params['HipAngleX'] = (slow1 * 4.2 + move * 5.0) * idleAmpEff;
+  params['HipAngleZ'] = (slow2 * 3.0 + move * 2.5 + weightShift * 2.2) * idleAmpEff;
+  params['HipAngleYDOWN'] = (breathe * 0.6) * idleAmpEff;
 
   // 裙子四片：相位错开，越外层越滞后（看起来像布料跟得上身体）
   const skirtAmp = 0.34;

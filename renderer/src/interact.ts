@@ -58,7 +58,18 @@ function paramHold(): Record<string, number> {
 }
 
 // 诊断计数器（调试接口 /debug 会读）
-const diag = { moves: 0, hits: 0, lastAlpha: -1, lastXY: [0, 0] as number[], cursor: 0 };
+const diag = { moves: 0, hits: 0, hitChecks: 0, lastAlpha: -1, lastXY: [0, 0] as number[], cursor: 0 };
+
+/** 节流版命中检测：mousemove 用，最多 80ms 一次（原生检测 1.6ms/次，太贵） */
+let lastOnCharAt = 0;
+let lastOnChar = false;
+function isOnCharacterThrottled(clientX: number, clientY: number): boolean {
+  const now = performance.now();
+  if (now - lastOnCharAt < 80) return lastOnChar;
+  lastOnCharAt = now;
+  lastOnChar = isOnCharacter(clientX, clientY);
+  return lastOnChar;
+}
 
 function setParam(name: string, value: number): void {
   paramHold()[name] = value;
@@ -79,6 +90,7 @@ function isOnCharacter(clientX: number, clientY: number): boolean {
     diag.lastXY = [x, y];
     if (x < 0 || y < 0 || x >= canvas.width || y >= canvas.height) { diag.lastAlpha = -4; return false; }
     const px = new Uint8Array(4);
+    diag.hitChecks++;
     gl.readPixels(x, y, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
     diag.lastAlpha = px[3];
     return px[3] > 16; // alpha 阈值
@@ -357,7 +369,11 @@ export function setupInteraction(): void {
         return;
       }
 
-      const on = isOnCharacter(ev.clientX, ev.clientY);
+      // 命中检测很贵（单次 readPixels ≈1.6ms，会打断 GPU 流水线）。
+      // 以前每个 mousemove 都测一次：125Hz 鼠标 = 每秒 200ms 白烧，移动时明显掉帧。
+      // 这里节流到 80ms 一次（点击/拖动仍走精确检测），视觉上完全看不出差别。
+      const on = isOnCharacterThrottled(ev.clientX, ev.clientY);
+      diag.hitChecks++;
       if (on) diag.hits++;
       // 鼠标「刚碰到她」→ 抖一下 / 歪个头，表示被摸到了
       // 鼠标「停在」她身上 250ms 才算摸到（只是路过不算），冷却 6 秒
@@ -1000,6 +1016,7 @@ export function setupInteraction(): void {
     sleepy: state.sleepy,
     moves: diag.moves,
     hits: diag.hits,
+    hitChecks: diag.hitChecks,
     lastAlpha: diag.lastAlpha,
     lastXY: diag.lastXY,
     // 视线（调试/测试用）：外壳推光标时这两个值应该跟着变
