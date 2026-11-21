@@ -106,7 +106,10 @@ function initGeometry() {
 }
 
 // ── 拖动状态（几何/尺寸归 geo 管，这里只记拖动的起点和速度） ──────
-const drag = { active: false, sx: 0, sy: 0, wx: 0, wy: 0, lx: 0, ly: 0, lt: 0 };
+let dragToMsgs = 0;   // 收到的 drag-to 消息数（调试）
+let dragWrites = 0;   // 实际执行的窗口移动次数（去重后）
+const drag = { active: false, sx: 0, sy: 0, wx: 0, wy: 0, lx: 0, ly: 0, lt: 0, tx: -99999, ty: -99999,
+  gx: 0, gy: 0, px: 0, py: 0, timer: 0 };
 
 function savePos() {
   if (geo) geo.savePos();
@@ -491,8 +494,64 @@ function setupIpc() {
     drag.sx = p.x; drag.sy = p.y;
     drag.wx = b.x; drag.wy = b.y;
     drag.lx = p.x; drag.ly = p.y; drag.lt = Date.now();
+    drag.tx = -99999; drag.ty = -99999;   // 复位去重基准
+    // 抓取偏移：光标 - 窗口位置。之后每帧用「当前光标 - 抓取偏移」算目标。
+    const cur = screen.getCursorScreenPoint();
+    drag.gx = cur.x - b.x;
+    drag.gy = cur.y - b.y;
+    drag.px = b.x; drag.py = b.y;
+    startDragLoop();
     log('[drag] start geo=', g.w, g.h);
   });
+
+  /**
+   * 拖动循环（主进程侧，~75Hz）。
+   *
+   * 为什么不放在页面里：门口那边要靠 mousemove，而窗口是在"追"光标的——
+   * 弹簧稍微落后一点，光标就跑到窗口外面，页面收不到 mousemove，目标停止更新，
+   * 窗口追上去、光标又进来……结果是"一顿一顿"。主进程直接读全局光标就没有这个问题。
+   *
+   * 弹簧：指数平滑（时间常数 34ms），把光标的高频抖动抹平，运动是连续的。
+   */
+  function startDragLoop() {
+    if (drag.timer) return;
+    const TAU = 34;
+    drag.timer = setInterval(() => {
+      if (!drag.active || !win || win.isDestroyed()) {
+        clearInterval(drag.timer);
+        drag.timer = 0;
+        return;
+      }
+      const cur = screen.getCursorScreenPoint();
+      const targetX = cur.x - drag.gx;
+      const targetY = cur.y - drag.gy;
+      const a = 1 - Math.exp(-13 / TAU);
+      drag.px += (targetX - drag.px) * a;
+      drag.py += (targetY - drag.py) * a;
+      const x = Math.round(drag.px);
+      const y = Math.round(drag.py);
+      if (x === drag.tx && y === drag.ty) return;   // 同一像素不重复移动
+      const now = Date.now();
+      const dt = Math.max(1, now - drag.lt);
+      const vx = drag.tx === -99999 ? 0 : ((x - drag.tx) / dt) * 16;
+      const vy = drag.ty === -99999 ? 0 : ((y - drag.ty) / dt) * 16;
+      drag.tx = x; drag.ty = y;
+      drag.lt = now;
+      const g = geo.get();
+      const d = screen.getPrimaryDisplay().workAreaSize;
+      const keep = 90;
+      const cx = Math.max(-g.w + keep, Math.min(d.width - keep, x));
+      const cy = Math.max(0, Math.min(d.height - keep, y));
+      dragWrites++;
+      geo.moveTo(cx, cy);
+      try { win.webContents.send('pet:drag-info', { vx, vy }); } catch (e) {}
+    }, 13);
+  }
+
+  // 拖动：页面侧弹簧算好的绝对窗口位置（每帧一次）。
+  // 主进程只做三件事：夹到屏内、去重、移动窗口。
+  // 去重是必须的：同一像素重复 setBounds 会白白触发一次窗口移动，
+  // 而"读回值"不能拿来比较（DIP↔物理像素往返会永远差 1px，去重就失效）。
 
   ipcMain.on('pet:drag-move', (_e, p) => {
     if (!win || win.isDestroyed() || !drag.active) return;
@@ -926,7 +985,10 @@ let lastHitBody = false;   // 上一次命中检测是否落在她身上
  * 能被抓住（用户体感：放大缩小后拖不动一小会）。
  */
 function noteResizeCooldown() {
-  skipUntil = Date.now() + 260;   // 90ms 一个 tick，跳过 2~3 个
+  // 冷却 700ms：缩放后你会马上伸手去抓她，而页面在新尺寸下重画完之前，
+  // 命中检测可能读到旧像素判成"不在她身上"。这段时间宁可先让她可交互，
+  // 结束时再强制重测一次恢复正确状态（回归 C1 靠这个兜底）。
+  skipUntil = Date.now() + 700;
   lastHitAt = 0;                  // 冷却一结束马上测
   lastCursor = { x: -1, y: -1 };
   try {
@@ -943,7 +1005,7 @@ function noteResizeCooldown() {
       forceNextHit = true;
       lastHitAt = 0;
       lastCursor = { x: -1, y: -1 };
-    }, 280);
+    }, 720);
   } catch (e) {}
 }
 let forceNextHit = false;   // 刚唤回时：第一次检测结果直接生效，不等防抖              // 窗口正在改尺寸的这段时间不做命中检测
@@ -1400,6 +1462,7 @@ function startApiServer() {
           pet: s,
           main: {
         hitTests,
+        dragToMsgs, dragWrites,
         ignoreToggles, ignoring: ignoringNow, interactive, dragging: drag.active },
         }))
         .catch((e) => send(500, { ok: false, error: String(e) }));

@@ -310,19 +310,10 @@ export function setupInteraction(): void {
       state.vy = info.vy || 0;
     });
   }
-
-  // 拖动节流：每帧最多发一次 IPC
-  let pendingDrag: { x: number; y: number } | null = null;
-  let dragRaf = 0;
-  const flushDrag = () => {
-    dragRaf = 0;
-    if (!pendingDrag) return;
-    const p = pendingDrag;
-    pendingDrag = null;
-    try {
-      if (b.dragMove) b.dragMove(p.x, p.y);
-    } catch (e) {}
-  };
+  // 拖动位置由**主进程**驱动（见 pet-shell/main.js 的 startDragLoop）：
+  // 主进程直接轮询全局光标 + 弹簧平滑 + 每帧一次 setBounds。
+  // 为什么不在页面里做：窗口在"追"光标，弹簧一落后光标就出窗口，
+  // 页面收不到 mousemove → 目标停更 → 一顿一顿。主进程没有这个死角。
 
   let lastTouchAt = 0;
   let touchTimer = 0;
@@ -362,10 +353,7 @@ export function setupInteraction(): void {
           applyRoamOffset();
           return;
         }
-        // 每个 mousemove 都发 IPC 会淹掉主进程（一秒几十次窗口移动 → 掉帧）。
-        // 这里只记最新位置，每帧最多发一次。
-        pendingDrag = { x: ev.screenX, y: ev.screenY };
-        if (!dragRaf) dragRaf = requestAnimationFrame(flushDrag);
+        // 窗口位置由主进程的拖动循环驱动（它自己轮询全局光标），页面这里不用管
         return;
       }
 
