@@ -938,6 +938,26 @@ export function setupInteraction(): void {
   // 启动时也检查一次（缓存里的适配结果可能来自更小的窗口）
   window.setTimeout(() => { try { fit.ensureVisible(); } catch (e) {} }, 1200);
 
+  // ── 舞台模式缩放：外壳只改这里的倍率，不再改窗口尺寸 ──────────
+  // 舞台（窗口）固定大小，角色在里面缩放：连续、平滑，也不会有"旧画面被裁"的一帧。
+  (window as any).__petSetZoom = (z: number): number => {
+    const v = Math.max(0.35, Math.min(1.4, Number(z) || 1));
+    try {
+      fit.setZoom(v);
+      // 放大后可能贴边：让贴边保险收一下（异步，不阻塞调用方）
+      try { (fit as any).ensureVisible?.(); } catch (e) {}
+      localStorage.setItem('pet.zoom', String(fit.getZoom()));
+    } catch (e) {}
+    return fit.getZoom();
+  };
+  // 恢复上次的倍率（窗口尺寸不再变，倍率必须持久化，否则每次启动都回到 1）
+  window.setTimeout(() => {
+    try {
+      const z = Number(localStorage.getItem('pet.zoom'));
+      if (Number.isFinite(z) && z > 0.2 && Math.abs(z - 1) > 0.01) fit.setZoom(z);
+    } catch (e) {}
+  }, 1600);
+
   // 彩蛋（不写进文档）：连续打出她的名字或暗号，她会有点反应。
   // 只在她的窗口有焦点时生效（点一下她就有了），不会记录别处的内容。
   let lastEggAt = 0;

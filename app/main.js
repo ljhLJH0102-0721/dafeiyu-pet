@@ -111,6 +111,21 @@ let dragWrites = 0;   // 实际执行的窗口移动次数（去重后）
 const drag = { active: false, sx: 0, sy: 0, wx: 0, wy: 0, lx: 0, ly: 0, lt: 0, tx: -99999, ty: -99999,
   gx: 0, gy: 0, px: 0, py: 0, timer: 0 };
 
+/**
+ * 舞台尺寸：窗口固定这么大，缩放只改舞台里的角色大小。
+ *
+ * 为什么这么做：每次改窗口尺寸都要重建透明表面 + 重新投影模型，
+ * 合成器还会先显示"旧画面按新窗口裁剪"的一帧（她脚离底边只有 30px，一裁就是腿）。
+ * 固定窗口后，缩放完全在渲染层做，连续、平滑、也不会再触发 setBounds 崩溃。
+ */
+function stageSize() {
+  let wa = { width: 1536, height: 864 };
+  try { wa = screen.getPrimaryDisplay().workAreaSize; } catch (e) {}
+  const w = Math.max(360, Math.min(620, Math.round(wa.width) - 40));
+  const h = Math.max(480, Math.min(Math.round(wa.height * 0.96), 860));
+  return { w, h };
+}
+
 function savePos() {
   if (geo) geo.savePos();
 }
@@ -187,7 +202,20 @@ function allowMediaPermissions() {
 }
 
 function createWindow() {
-  const bounds = geo.initialBounds();
+  // 舞台模式：窗口尺寸固定，缩放只改舞台里的角色大小（见 stageSize 注释）。
+  // geo.initialBounds() 仍然读一次，只为了拿到"上次她占多大、在哪"，
+  // 用来把舞台中心放到她原来的中心上——升级后位置不会突然跳。
+  const saved = geo.initialBounds();
+  const stage = stageSize();
+  const cx = saved.x + saved.width / 2;
+  const cy = saved.y + saved.height / 2;
+  const bounds = {
+    x: Math.round(cx - stage.w / 2),
+    y: Math.round(cy - stage.h / 2),
+    width: stage.w,
+    height: stage.h,
+  };
+  geo.setStage(bounds);
 
   win = new BrowserWindow({
     title: '大肥鱼',
@@ -239,7 +267,19 @@ function createWindow() {
   win.webContents.on('console-message', (_e, level, message) => {
     if (level >= 2) log('[page]', message);
   });
-  win.webContents.on('did-finish-load', () => { log('page loaded'); injectPlugins(); });
+  win.webContents.on('did-finish-load', () => {
+    log('page loaded');
+    injectPlugins();
+    // 舞台模式下窗口尺寸不再承载"她多大"，所以首次升级时要按上次记录的尺寸换算出倍率；
+    // 页面若已经存过 zoom（localStorage），以页面为准。
+    setTimeout(() => {
+      runJs('localStorage.getItem("pet.zoom")').then((z) => {
+        if (z) return;
+        const s = geo.loadPos ? geo.loadPos() : null;
+        if (s && Number.isFinite(s.w) && Number.isFinite(s.h)) applySize(s.w, s.h);
+      }).catch(() => {});
+    }, 1800);
+  });
 
   // 用户手动拖边缩放 → 交给 geo 对账（拖动中一律忽略，≤2px 抖动忽略）
   let resizeSaveTimer = null;
@@ -542,9 +582,12 @@ function setupIpc() {
       // 任何一环变成 NaN 都会让 setBounds 抛 "conversion failure"，主进程弹窗崩掉。
       // 逐项守住：非有限值这一帧直接跳过。
       if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(g.w) || !Number.isFinite(g.h)) return;
+      // 舞台模式：窗口比她大，按「窗口中心」夹 —— 中心最多贴到离屏幕边 80px，
+      // 她最多挂出去一点，不会被整只拖到屏幕外（以前按窗口边夹，大窗口能拖没）。
       const keep = 90;
-      const cx = Math.max(-g.w + keep, Math.min(d.width - keep, x));
-      const cy = Math.max(0, Math.min(d.height - keep, y));
+      const margin = 80;
+      const cx = Math.max(margin - g.w / 2, Math.min(d.width - margin - g.w / 2, x));
+      const cy = Math.max(margin - g.h / 2, Math.min(d.height - margin - g.h / 2, y));
       if (!Number.isFinite(cx) || !Number.isFinite(cy)) return;
       dragWrites++;
       geo.moveTo(cx, cy);
@@ -1115,16 +1158,21 @@ let sizeSaveTimer = null;
 // 肉眼是平滑放大/缩小，而不是一格一格跳。
 const SIZE_ANIM_MS = 130;
 let sizeAnim = { timer: 0, from: null, to: null, t0: 0 };
-// 缩放：主进程被 resize 事件拖住，补间动画实测只走出 2~3 步（反而更抖），
-// 所以保持"一次到位"，靠更小的步进（1.08 → 1.04）降低跳跃感。
+/**
+ * 缩放 = 改「舞台里的角色大小」，**不再改窗口尺寸**。
+ *
+ * 参数沿用老的 (w, h)：表示"她大概占多大"。按舞台高度换算成倍率：
+ * 舞台高 h_stage 时，倍率 1.0 的角色约高 0.82 × h_stage。
+ * 倍率上下限交给页面（fit.setZoom 自己会夹）。
+ */
 function applySize(w, h) {
   if (!geo) return;
-  const target = geo.clampSize(Number(w) || 0, Number(h) || 0);
-  if (!target || !Number.isFinite(target.w) || !Number.isFinite(target.h)) return;
-  const cur = geo.get();
-  if (Math.abs(cur.w - target.w) < 1 && Math.abs(cur.h - target.h) < 1) return;
-  if (!geo.setSize(target.w, target.h)) return;
-  noteResizeCooldown();
+  const g = geo.get();
+  const targetH = Number(h) || 0;
+  if (!Number.isFinite(targetH) || targetH <= 0 || !Number.isFinite(g.h) || g.h <= 0) return;
+  const z = Math.max(0.35, Math.min(1.4, targetH / (g.h * 0.82)));
+  const js = '(function(){ try { return window.__petSetZoom(' + z.toFixed(4) + '); } catch (e) { return 0; } })()';
+  runJs(js).catch(() => {});
   if (sizeSaveTimer) clearTimeout(sizeSaveTimer);
   sizeSaveTimer = setTimeout(() => {
     try { savePos(); } catch (e) {}

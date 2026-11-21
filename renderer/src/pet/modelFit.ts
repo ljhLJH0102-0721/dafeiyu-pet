@@ -282,7 +282,11 @@ export function createModelFit(deps: ModelFitDeps): ModelFit {
       const rect = deps.getCanvas().getBoundingClientRect();
       const canvasH = Math.max(80, rect.height);
       const baseH = (fitRef ? fitRef.H : (deps.maxLogicalHeight || canvasH)) * 0.82;
-      return Math.max(1, Math.min(3.0, (canvasH * 0.80) / Math.max(1, baseH)));
+      // 舞台模式下窗口尺寸固定、缩放靠倍率，所以上限不能再按"80% 画布"卡死
+      // （那样 520x760 / 640x900 这些档位会全部撞到同一个上限，看起来"放不大"）。
+      // 放开到 1.4，超出画布的部分由 ensureVisible 一次算到位地收回来。
+      const byCanvas = canvasH > 0 ? (canvasH * 0.80) / Math.max(1, baseH) : 1;
+      return Math.max(1.4, Math.min(3.0, byCanvas));
     } catch (e) {
       return 3.0;
     }
@@ -331,12 +335,16 @@ export function createModelFit(deps: ModelFitDeps): ModelFit {
     if (W < 40 || H < 40) return null;
     const step = Math.max(2, Math.round(Math.min(W, H) / 160));
     const on = deps.isOnCharacter;
+    // 每边采样多列/多行：只看中线会漏掉偏在一侧的头发/尾巴，
+    // 结果就是"检测说放得下，实际已经顶边"（放大到顶时切头就是这么来的）。
+    const TOP_X = [0.25, 0.4, 0.5, 0.6, 0.75];
+    const SIDE_Y = [0.3, 0.5, 0.7];
 
-    // 上：沿中线（略偏左/右各试一条，避开中间可能有空隙的地方）
+    // 上
     let top = H;
     for (let y = 0; y < H; y += step) {
       let hit = false;
-      for (const fx of [0.5, 0.42, 0.58]) {
+      for (const fx of TOP_X) {
         if (on(W * fx, y)) { hit = true; break; }
       }
       if (hit) { top = y; break; }
@@ -344,7 +352,7 @@ export function createModelFit(deps: ModelFitDeps): ModelFit {
     let bottom = H;
     for (let y = H - 1; y >= 0; y -= step) {
       let hit = false;
-      for (const fx of [0.5, 0.42, 0.58]) {
+      for (const fx of TOP_X) {
         if (on(W * fx, y)) { hit = true; break; }
       }
       if (hit) { bottom = H - 1 - y; break; }
@@ -352,7 +360,7 @@ export function createModelFit(deps: ModelFitDeps): ModelFit {
     let left = W;
     for (let x = 0; x < W; x += step) {
       let hit = false;
-      for (const fy of [0.5, 0.4, 0.6]) {
+      for (const fy of SIDE_Y) {
         if (on(x, H * fy)) { hit = true; break; }
       }
       if (hit) { left = x; break; }
@@ -360,7 +368,7 @@ export function createModelFit(deps: ModelFitDeps): ModelFit {
     let right = W;
     for (let x = W - 1; x >= 0; x -= step) {
       let hit = false;
-      for (const fy of [0.5, 0.4, 0.6]) {
+      for (const fy of SIDE_Y) {
         if (on(x, H * fy)) { hit = true; break; }
       }
       if (hit) { right = W - 1 - x; break; }
@@ -381,7 +389,8 @@ export function createModelFit(deps: ModelFitDeps): ModelFit {
     try {
       H = Math.round(deps.getCanvas().getBoundingClientRect().height) || 200;
     } catch (e) {}
-    const margin = Math.max(8, Math.round(H * 0.012));
+    // 边距 2.6%（至少 14px）：留得比"刚好不裁"多一点，放大到顶时不会顶到画布边。
+    const margin = Math.max(16, Math.round(H * 0.032));
 
     await raf();
     let e = probeEdges();

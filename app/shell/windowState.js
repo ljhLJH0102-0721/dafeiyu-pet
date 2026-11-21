@@ -147,6 +147,27 @@ function createWindowState({ screen, fs, posPath, defaults, log }) {
   }
 
   /**
+   * 直接设定窗口矩形（**不做等比夹取**）。
+   *
+   * 用途：舞台模式。窗口固定成一个"舞台"，缩放改成在舞台内部缩放角色，
+   * 于是缩放期间完全不用碰窗口尺寸（不再有裁剪、不再有合成器卡顿）。
+   */
+  function setStage(b) {
+    if (!b) return false;
+    const w = Math.round(Number(b.width));
+    const h = Math.round(Number(b.height));
+    if (!Number.isFinite(w) || !Number.isFinite(h) || w < 40 || h < 40) return false;
+    st.w = w;
+    st.h = h;
+    st.x = Math.round(Number(b.x));
+    st.y = Math.round(Number(b.y));
+    if (!Number.isFinite(st.x)) st.x = 0;
+    if (!Number.isFinite(st.y)) st.y = 0;
+    safeSetBounds({ x: st.x, y: st.y, width: st.w, height: st.h });
+    return true;
+  }
+
+  /**
    * 全屏漫游开关。
    * 开：窗口铺满整个工作区（她可以在屏幕任意位置活动），记住当前尺寸以便恢复。
    * 关：恢复进入漫游前的尺寸与位置。
@@ -336,6 +357,7 @@ function createWindowState({ screen, fs, posPath, defaults, log }) {
     initialBounds,
     clampSize,
     clampPosition,
+    setStage,
     snap,
     setSize,
     setRoam,

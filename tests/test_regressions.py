@@ -233,11 +233,15 @@ def main():
 
         # ── A. 窗口几何 ────────────────────────────────
         def a1():
+            # 舞台模式：窗口尺寸固定不变，缩放改的是「舞台里角色的大小」
             api("/size", {"w": 520, "h": 760})
-            time.sleep(0.8)
-            w = window_rect(hwnd)
-            return (w["w"] >= 480 and abs(w["h"] - 760) <= 60), "%dx%d" % (w["w"], w["h"])
-        r.check("A1", "窗口尺寸可设置", a1)
+            time.sleep(1.0)
+            b = json.loads(ev("JSON.stringify(window.__petBounds())"))
+            win = window_rect(hwnd)
+            her_h = b.get("height") or 0
+            ok = abs(her_h - 760) <= 90
+            return ok, "角色高 %dpx / 窗口 %dx%d" % (her_h, win["w"], win["h"])
+        r.check("A1", "尺寸档位改角色大小", a1)
 
         def a2():
             base = window_rect(hwnd)
@@ -254,12 +258,18 @@ def main():
         def b1():
             set_roam(False)
             time.sleep(1.2)
-            before = window_rect(hwnd)["w"]
-            wheel(100, 4)     # 缩小
+            api("/size", {"w": 520, "h": 760})
+            time.sleep(0.9)
+            before = json.loads(ev("JSON.stringify(window.__petBounds())"))["height"]
+            win0 = window_rect(hwnd)
+            wheel(100, 8)     # 缩小
             time.sleep(1.5)
-            after = window_rect(hwnd)["w"]
-            return after < before - 10, "%d → %d" % (before, after)
-        r.check("B1", "普通模式滚轮改窗口", b1)
+            after = json.loads(ev("JSON.stringify(window.__petBounds())"))["height"]
+            win1 = window_rect(hwnd)
+            ok = (after < before - 20) and (abs(win1["w"] - win0["w"]) <= 4)
+            return ok, "角色高 %d → %d，窗口 %dx%d → %dx%d" % (
+                before, after, win0["w"], win0["h"], win1["w"], win1["h"])
+        r.check("B1", "滚轮改角色大小、窗口不动", b1)
 
         def b2():
             api("/size", {"w": 520, "h": 760})
@@ -394,7 +404,7 @@ def main():
         r.check("F2", "漫游缩放不缩窗口", f2)
 
         def f3():
-            """放大到顶时不能把画布撑满（会切头）。整段重试，页面忙的时候 /eval 会 500。"""
+            """放大到顶时不能切头。用 __petBounds（真实像素测量），别用估算。整段重试。"""
             last = "未知错误"
             for attempt in range(3):
                 try:
@@ -403,15 +413,13 @@ def main():
                     ev("window.__setRoamOffset(0, 0)")
                     time.sleep(0.5)
                     wheel(-100, 12)
-                    time.sleep(1.5)
-                    info = fit_info()
-                    canvas_h = int(ev("String(window.innerHeight)"))
-                    base = info["fitRef"]["H"] * 0.884
-                    zoom = info["curScale"] / info["fitRef"]["scale"]
-                    height = base * zoom
-                    ratio = height / canvas_h
-                    return ratio <= 0.95, "缩放 %.2fx → 高度 %.0f / 画布 %d（%.0f%%）" % (
-                        zoom, height, canvas_h, ratio * 100)
+                    time.sleep(2.0)   # 等贴边保险生效
+                    b = json.loads(ev("JSON.stringify(window.__petBounds())"))
+                    canvas_h = b.get("canvasH") or 1
+                    her_h = b.get("height") or 0
+                    ratio = her_h / canvas_h
+                    return ratio <= 0.95, "角色高 %d / 画布 %d（%.0f%%）上边距 %s" % (
+                        her_h, canvas_h, ratio * 100, b.get("top"))
                 except Exception as exc:
                     last = "%s: %s" % (type(exc).__name__, exc)
                     time.sleep(3.0)
