@@ -1044,15 +1044,28 @@ function startHitTestLoop() {
 
 // ── 托盘 ──────────────────────────────────────────────────
 let sizeSaveTimer = null;
+// 缩放合并：连续按快捷键/滚轮时，把 80ms 内的多次改尺寸请求合并成一次。
+// 每次 setBounds 都会让透明窗口重新分配表面，在核显上很贵，
+// 连点 6 下就 resize 6 次 → 肉眼看到闪卡。合并后最多 ~12 次/秒。
+let pendingSize = null;
+let pendingSizeTimer = 0;
 function applySize(w, h) {
   if (!geo) return;
-  // 夹取 / 等比 / 位置回拉 / 尺寸落盘，全部交给 windowState（唯一真相）
-  if (!geo.setSize(w, h)) return;
-  noteResizeCooldown();
-  if (sizeSaveTimer) clearTimeout(sizeSaveTimer);
-  sizeSaveTimer = setTimeout(() => {
-    try { savePos(); } catch (e) {}
-  }, 800);
+  pendingSize = { w: Number(w) || 0, h: Number(h) || 0 };
+  if (pendingSizeTimer) return;
+  pendingSizeTimer = setTimeout(() => {
+    pendingSizeTimer = 0;
+    const p = pendingSize;
+    pendingSize = null;
+    if (!p || !geo) return;
+    // 夹取 / 等比 / 位置回拉 / 尺寸落盘，全部交给 windowState（唯一真相）
+    if (!geo.setSize(p.w, p.h)) return;
+    noteResizeCooldown();
+    if (sizeSaveTimer) clearTimeout(sizeSaveTimer);
+    sizeSaveTimer = setTimeout(() => {
+      try { savePos(); } catch (e) {}
+    }, 800);
+  }, 80);
 }
 
 function applyInteractive() {

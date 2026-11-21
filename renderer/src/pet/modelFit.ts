@@ -245,15 +245,27 @@ export function createModelFit(deps: ModelFitDeps): ModelFit {
   }
 
   function rescaleForWindow(): boolean {
-    zoom = Math.min(zoom, maxZoomAllowed());
-    fitCorrection = 1;   // 窗口尺寸变了，贴边情况要重新评估
+    // ⚠️ 以前这里有一句 zoom = Math.min(zoom, maxZoomAllowed())。
+    // resize 事件里 canvas 的 rect 还是**旧尺寸**：窗口放大时用旧高度算出的
+    // maxZoomAllowed 会偏小（实测 0.75），一夹就把用户倍率永久压到 0.75，
+    // 表现就是"放大一下又变回原来大小"。
+    // 上限只在用户主动缩放（zoomBy/setZoom）时夹，那里的画布尺寸是准的。
+    // 注意：这里也**不能**把 fitCorrection 重置成 1。
+    // 重置会让她在每次缩放的瞬间先"变大"（去掉贴边修正），
+    // 再等 550ms 后被贴边保险缩回去 —— 用户看到的就是"变大又变回原大小"。
+    // 窗口形状是等比夹取的，修正系数沿用上一次的即可；ensureVisible 会微调。
     const arr = matrix();
     if (!arr || !fitRef) return false;
     // 用 window.innerHeight：resize 瞬间 canvas 的 rect 会滞后，导致算错比例
     const realH = Math.max(50, Math.round(window.innerHeight || deps.getCanvas().getBoundingClientRect().height));
-    const H = logicalHeight(realH);
     const a = arr.getArray();
-    const k = H / fitRef.H;
+    // ⚠️ 关键：矩阵缩放**不随窗口尺寸变**。
+    // Cubism 的 viewMatrix 已经把画布高度算进去了（y 值域固定、像素高度随画布缩放），
+    // 这里再乘一次 H/fitRef.H 等于缩了两次：窗口从 807 缩到 586 时她会只有原来的 55%
+    // （实测占画布 82.5% → 62.5%），随后贴边保险又反过来修，就成了"放大一下又变小"。
+    // 只有漫游模式（逻辑高度被封顶）才需要按 cap/H 缩。
+    const cap = deps.maxLogicalHeight || 0;
+    const k = cap > 0 && realH > cap ? cap / realH : 1;
     // 即使尺寸"变回原值"也要重写矩阵，否则滚轮预览留下的缩放会留在身上（看起来她变小了）
     const kk = zoom * fitCorrection;
     a[0] = fitRef.scale * k * kk;
@@ -357,31 +369,54 @@ export function createModelFit(deps: ModelFitDeps): ModelFit {
   }
 
   /**
-   * 贴边保险：她离哪条边太近（或已经出界），就把 zoom 缩一点再测，最多 6 次。
-   * 触发场景：窗口拉到最大、滚轮放大过头、换尺寸后换算偏差。
+   * 贴边保险：她离边太近就缩一点。
+   *
+   * 关键：**一次算到位，不要"先放回原样再一帧帧缩"**。
+   * 以前的做法是先把 fitCorrection 重置成 1（她先变大），
+   * 再用 6 帧逐次缩回去 —— 用户看到的就是"莫名变大又变回原大小"，每缩放一次闪一下。
    */
   async function ensureVisible(): Promise<boolean> {
     if (!fitRef) return false;
-    const margin = Math.max(8, Math.round((deps.getCanvas().getBoundingClientRect().height || 200) * 0.012));
-    // 每次从「不修正」开始，避免修正一层层累积
-    fitCorrection = 1;
-    applyFitInner(fitRef);
-    for (let i = 0; i < 6; i++) {
-      await raf();
-      const e = probeEdges();
-      if (!e) return false;
-      const need = Math.min(e.top, e.bottom, e.left, e.right);
-      if (need >= margin) return true;
-      // 缩到底还是贴边：放弃这次修正，恢复原样
-      if (fitCorrection <= 0.36) {
+    let H = 200;
+    try {
+      H = Math.round(deps.getCanvas().getBoundingClientRect().height) || 200;
+    } catch (e) {}
+    const margin = Math.max(8, Math.round(H * 0.012));
+
+    await raf();
+    let e = probeEdges();
+    if (!e) return false;
+
+    const need = Math.min(e.top, e.bottom, e.left, e.right);
+    if (need >= margin) {
+      // 已经放得下：如果之前有修正，平滑地还原（一次到位，不做动画）
+      if (fitCorrection < 1) {
         fitCorrection = 1;
         applyFitInner(fitRef);
-        return false;
       }
-      // 只改「这一次」的修正系数，绝不动用户的 zoom
-      // （以前直接 zoom *= 0.92：放大时只要被误触发一次，她就永久变小了）
-      fitCorrection = Math.max(0.35, fitCorrection * 0.92);
+      return true;
+    }
+
+    // 按"当前画面里她的实际高度"一次算出需要的倍率
+    const artH = Math.max(1, H - e.top - e.bottom);
+    const targetH = Math.max(1, H - margin * 2);
+    let f = targetH / artH;                     // < 1 表示要缩小
+    f = Math.max(0.5, Math.min(1.0, f));
+    const next = Math.max(0.35, fitCorrection * f);
+    if (Math.abs(next - fitCorrection) > 0.002) {
+      fitCorrection = next;
       applyFitInner(fitRef);
+    }
+
+    // 复核一次；还差得多就再补一刀（仍然只动 fitCorrection）
+    await raf();
+    const e2 = probeEdges();
+    if (e2) {
+      const need2 = Math.min(e2.top, e2.bottom, e2.left, e2.right);
+      if (need2 < margin * 0.55 && fitCorrection > 0.36) {
+        fitCorrection = Math.max(0.35, fitCorrection * 0.92);
+        applyFitInner(fitRef);
+      }
     }
     return true;
   }
@@ -399,5 +434,14 @@ export function createModelFit(deps: ModelFitDeps): ModelFit {
     fitRef = null;
   }
 
-  return { autoFit, rescaleForWindow, applyFit, getRef, getScale, isReady, invalidate, zoomBy, ensureVisible, getZoom, setZoom };
+  (function attachDebug(t: any) {
+    t.debugZoom = () => zoom;
+    t.debugCorrection = () => fitCorrection;
+    t.debugMaxZoom = () => maxZoomAllowed();
+  })({ autoFit, rescaleForWindow, applyFit, getRef, getScale, isReady, invalidate, zoomBy, ensureVisible, getZoom, setZoom });
+  const api: any = { autoFit, rescaleForWindow, applyFit, getRef, getScale, isReady, invalidate, zoomBy, ensureVisible, getZoom, setZoom };
+  api.debugZoom = () => zoom;
+  api.debugCorrection = () => fitCorrection;
+  api.debugMaxZoom = () => maxZoomAllowed();
+  return api;
 }

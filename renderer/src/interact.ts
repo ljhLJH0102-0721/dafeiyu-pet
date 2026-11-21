@@ -138,6 +138,9 @@ const fit = createModelFit({
   return {
     fitRef: r ? { W: r.W, H: r.H, scale: Math.round(r.scale * 1e4) / 1e4 } : null,
     curScale: cur != null ? Math.round(cur * 1e4) / 1e4 : null,
+    zoom: Math.round((fit as any).debugZoom?.() * 1e4) / 1e4,
+    corr: Math.round((fit as any).debugCorrection?.() * 1e4) / 1e4,
+    maxZoom: Math.round((fit as any).debugMaxZoom?.() * 1e4) / 1e4,
     innerW: window.innerWidth,
     innerH: window.innerHeight,
   };
