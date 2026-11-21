@@ -772,6 +772,27 @@ function buildMenuData() {
       { sep: true },
       { id: 'g-exp', label: '表情', icon: '', chips: EXPRESSIONS.map((n) => ({ id: 'exp:' + n, label: n })) },
       { id: 'g-mot', label: '动作', icon: '', chips: MOTIONS.map((n) => ({ id: 'mot:' + n, label: n })) },
+      // 原皮自带的服装/配件开关（Exp3 里那些开关型表情，本质是 Clothes*/key*/Movement* 参数）
+      {
+        id: 'g-wardrobe',
+        label: '外观',
+        icon: '👗',
+        chips: [
+          { id: 'wd:skirt', label: '换裙子' },
+          { id: 'wd:tail', label: '尾巴' },
+          { id: 'wd:chest', label: '胸口衣服' },
+          { id: 'wd:shoes', label: '脱鞋' },
+          { id: 'wd:body-default', label: '默认体型' },
+          { id: 'wd:body1', label: '体型1' },
+          { id: 'wd:body2', label: '体型2' },
+          { id: 'wd:glasses-none', label: '无眼镜' },
+          { id: 'wd:glassesBlack', label: '黑框眼镜' },
+          { id: 'wd:glassesMono', label: '单片眼镜' },
+          { id: 'wd:bowl', label: '钢盆' },
+          { id: 'wd:loading', label: '加载条' },
+          { id: 'wd:point', label: '竖食指' },
+        ],
+      },
       { sep: true },
       // 插件贡献的菜单项（创意工坊里装的）
       ...pluginHost.menuItems(),
@@ -830,6 +851,22 @@ function handleMenuAction(id) {
   }
   if (id.startsWith('mot:')) {
     fire('motion', { group: id.slice(4), no: 0 });
+    return;
+  }
+  if (id.startsWith('wd:')) {
+    const key = id.slice(3);
+    // body-default / glasses-none 是"关掉全部同类"，其余是切换或指定
+    if (key === 'body-default') {
+      runJs('window.__petWardrobe && window.__petWardrobe("body1", false)').catch(() => {});
+      runJs('window.__petWardrobe && window.__petWardrobe("body2", false)').catch(() => {});
+    } else if (key === 'glasses-none') {
+      runJs('window.__petWardrobe && window.__petWardrobe("glassesBlack", false)').catch(() => {});
+      runJs('window.__petWardrobe && window.__petWardrobe("glassesMono", false)').catch(() => {});
+    } else if (key === 'body1' || key === 'body2' || key === 'glassesBlack' || key === 'glassesMono') {
+      runJs('window.__petWardrobe && window.__petWardrobe("' + key + '", true)').catch(() => {});
+    } else {
+      runJs('window.__petWardrobe && window.__petWardrobe("' + key + '")').catch(() => {});
+    }
     return;
   }
   switch (id) {
