@@ -949,6 +949,69 @@ export function setupInteraction(): void {
   // 启动时也检查一次（缓存里的适配结果可能来自更小的窗口）
   window.setTimeout(() => { if (roamMode) { try { fit.ensureVisible(); } catch (e) {} } }, 1200);
 
+  // ── 衣柜：原模型自带的服装/配件开关 ──────────────────────────
+  // 原皮的 Exp3 目录里有一批"开关型"表情，本质就是把某个参数写成常量：
+  //   裙子切换 Clothes1=-1 / 尾巴 Clothes5=-1 / 胸口衣服 Clothes3=1 / 脱鞋 Clothes4=1
+  //   体型 Clothes2=0(默认)/0.4(体型1)/1(体型2)
+  //   黑框眼镜 key11=1 / 单片眼镜 key12=1 / 钢盆 key10=1 / 加载 key8=1
+  //   竖食指 Movement1=0 & Movement3=1
+  // 直接写参数（paramHold）比走 expression 稳：不会被表情切换冲掉，也不会跟 pose 打架。
+  const WARDROBE: Record<string, { on: Record<string, number>; off: Record<string, number>; only?: string[] }> = {
+    skirt: { on: { Clothes1: -1 }, off: { Clothes1: 0 } },
+    tail: { on: { Clothes5: -1 }, off: { Clothes5: 0 } },
+    chest: { on: { Clothes3: 1 }, off: { Clothes3: 0 } },
+    shoes: { on: { Clothes4: 1 }, off: { Clothes4: 0 } },
+    glassesBlack: { on: { key11: 1 }, off: { key11: 0 }, only: ['glassesMono'] },
+    glassesMono: { on: { key12: 1 }, off: { key12: 0 }, only: ['glassesBlack'] },
+    bowl: { on: { key10: 1 }, off: { key10: 0 } },
+    loading: { on: { key8: 1 }, off: { key8: 0 } },
+    point: { on: { Movement1: 0, Movement3: 1 }, off: { Movement1: 0, Movement3: 0 } },
+    body1: { on: { Clothes2: 0.4 }, off: { Clothes2: 0 }, only: ['body2'] },
+    body2: { on: { Clothes2: 1 }, off: { Clothes2: 0 }, only: ['body1'] },
+  };
+  let wardrobe: Record<string, boolean> = {};
+  try {
+    const saved = JSON.parse(localStorage.getItem('pet.wardrobe') || '{}');
+    if (saved && typeof saved === 'object') {
+      for (const k in WARDROBE) wardrobe[k] = !!saved[k];
+    }
+  } catch (e) {}
+  const applyWardrobe = () => {
+    const h = paramHold();
+    for (const k in WARDROBE) {
+      const def = WARDROBE[k];
+      if (wardrobe[k]) {
+        for (const p in def.on) h[p] = def.on[p];
+      } else {
+        // 关掉时**删掉参数**、交还模型自己的默认值。
+        // 写 0 是错的：原皮有些参数的默认值不是 0（尾巴/裙子默认就是开的），
+        // 写 0 会把她换成另一套（实测尾巴直接消失）。
+        for (const p in def.on) delete h[p];
+      }
+    }
+    try { localStorage.setItem('pet.wardrobe', JSON.stringify(wardrobe)); } catch (e) {}
+    try { (window as any).pet?.wardrobeState?.(wardrobe); } catch (e) {}
+    return wardrobe;
+  };
+  (window as any).__petWardrobe = (key: string, on?: boolean): Record<string, boolean> => {
+    const def = WARDROBE[key];
+    if (!def) return wardrobe;
+    const next = typeof on === 'boolean' ? on : !wardrobe[key];
+    wardrobe[key] = next;
+    if (next && def.only) for (const other of def.only) wardrobe[other] = false;
+    applyWardrobe();
+    return wardrobe;
+  };
+  (window as any).__petWardrobeState = () => ({ ...wardrobe });
+  (window as any).__petWardrobeApply = (st: any) => {
+    if (!st || typeof st !== 'object') return wardrobe;
+    for (const k in WARDROBE) wardrobe[k] = !!st[k];
+    applyWardrobe();
+    return wardrobe;
+  };
+  // 启动时把上次的衣柜状态套上去（模型加载完之后）
+  window.setTimeout(() => { try { applyWardrobe(); } catch (e) {} }, 1800);
+
   // ── 舞台模式缩放：外壳只改这里的倍率，不再改窗口尺寸 ──────────
   // 舞台（窗口）固定大小，角色在里面缩放：连续、平滑，也不会有"旧画面被裁"的一帧。
 

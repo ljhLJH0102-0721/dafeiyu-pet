@@ -108,6 +108,8 @@ function initGeometry() {
 // ── 拖动状态（几何/尺寸归 geo 管，这里只记拖动的起点和速度） ──────
 let dragToMsgs = 0;   // 收到的 drag-to 消息数（调试）
 let dragWrites = 0;   // 实际执行的窗口移动次数（去重后）
+// 衣柜状态缓存（页面是真相，这里只给右键菜单打勾用）
+let wardrobeState = {};
 const drag = { active: false, sx: 0, sy: 0, wx: 0, wy: 0, lx: 0, ly: 0, lt: 0, tx: -99999, ty: -99999,
   gx: 0, gy: 0, px: 0, py: 0, timer: 0 };
 
@@ -520,6 +522,24 @@ function setupIpc() {
     win.setIgnoreMouseEvents(!!ignore, { forward: true });
   });
 
+  // ── 衣柜（原模型自带的服装/配件开关）──────────────────────
+  // 页面是真相：它把参数写进 paramHold 并持久化；主进程只缓存一份给菜单打勾用。
+  ipcMain.on('pet:wardrobe-state', (_e, st) => {
+    if (st && typeof st === 'object') wardrobeState = st;
+    try { refreshTrayMenu(); } catch (e) {}
+  });
+
+
+  /** 明确设置某个衣柜开关（关掉时传 false） */
+  function setWardrobe(key, on) {
+    runJs('window.__petWardrobe && window.__petWardrobe(' + JSON.stringify(key) + ', ' + (on ? 'true' : 'false') + ')').catch(() => {});
+  }
+
+  /** 菜单里点一下：切换某个衣柜开关 */
+  function toggleWardrobe(key) {
+    runJs('window.__petWardrobe && window.__petWardrobe(' + JSON.stringify(key) + ')').catch(() => {});
+  }
+
   ipcMain.on('pet:scale', (_e, k) => {
     const f = Number(k) || 1;
     if (!Number.isFinite(f) || f <= 0 || f === 1) return;
@@ -682,6 +702,35 @@ function setupIpc() {
           { label: '中', click: () => applySize(420, 620) },
           { label: '大', click: () => applySize(520, 760) },
           { label: '特大', click: () => applySize(640, 900) },
+        ],
+      },
+      {
+        label: '外观',
+        submenu: [
+          { label: '换裙子', type: 'checkbox', checked: !!wardrobeState.skirt, click: () => toggleWardrobe('skirt') },
+          { label: '尾巴', type: 'checkbox', checked: !!wardrobeState.tail, click: () => toggleWardrobe('tail') },
+          { label: '胸口衣服', type: 'checkbox', checked: !!wardrobeState.chest, click: () => toggleWardrobe('chest') },
+          { label: '脱鞋', type: 'checkbox', checked: !!wardrobeState.shoes, click: () => toggleWardrobe('shoes') },
+          { type: 'separator' },
+          {
+            label: '体型',
+            submenu: [
+              { label: '默认', type: 'checkbox', checked: !wardrobeState.body1 && !wardrobeState.body2, click: () => { setWardrobe('body1', false); setWardrobe('body2', false); } },
+              { label: '体型1', type: 'checkbox', checked: !!wardrobeState.body1, click: () => toggleWardrobe('body1') },
+              { label: '体型2', type: 'checkbox', checked: !!wardrobeState.body2, click: () => toggleWardrobe('body2') },
+            ],
+          },
+          {
+            label: '眼镜',
+            submenu: [
+              { label: '无', type: 'checkbox', checked: !wardrobeState.glassesBlack && !wardrobeState.glassesMono, click: () => { setWardrobe('glassesBlack', false); setWardrobe('glassesMono', false); } },
+              { label: '黑框眼镜', type: 'checkbox', checked: !!wardrobeState.glassesBlack, click: () => toggleWardrobe('glassesBlack') },
+              { label: '单片眼镜', type: 'checkbox', checked: !!wardrobeState.glassesMono, click: () => toggleWardrobe('glassesMono') },
+            ],
+          },
+          { label: '钢盆', type: 'checkbox', checked: !!wardrobeState.bowl, click: () => toggleWardrobe('bowl') },
+          { label: '加载条', type: 'checkbox', checked: !!wardrobeState.loading, click: () => toggleWardrobe('loading') },
+          { label: '竖食指', type: 'checkbox', checked: !!wardrobeState.point, click: () => toggleWardrobe('point') },
         ],
       },
       {

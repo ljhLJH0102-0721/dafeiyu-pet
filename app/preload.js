@@ -8,6 +8,8 @@ contextBridge.exposeInMainWorld('pet', {
   dragStart: (x, y) => ipcRenderer.send('pet:drag-start', { x, y }),
   dragMove: (x, y) => ipcRenderer.send('pet:drag-move', { x, y }),
   dragEnd: () => ipcRenderer.send('pet:drag-end'),
+  // 衣柜状态上报（主进程右键菜单里打勾用）
+  wardrobeState: (st) => ipcRenderer.send('pet:wardrobe-state', st),
   // 右键菜单（设置 / 互动）
   showMenu: () => ipcRenderer.send('pet:menu'),
   // 缩放（Ctrl+滚轮用）：k 是倍率，比如 1.1 / 0.9
