@@ -565,6 +565,11 @@ export function setupInteraction(): void {
     state.gazeX += (state.targetGazeX - state.gazeX) * 0.18;
     state.gazeY += (state.targetGazeY - state.gazeY) * 0.18;
 
+    // ── 连续缩放：把 zoom 往目标倍率推（时间常数在 modelFit 里）────────
+    // 滚轮/快捷键只设目标值，这里每帧逼近 —— 连续滚动会合并成一次顺滑缩放，
+    // 而且全程不碰窗口尺寸（窗口是固定舞台）。
+    try { (fit as any).stepZoom?.(gap); } catch (e) {}
+
     // 摆动弹簧（纯函数，状态留在外面）
     swayState = stepSway(swayState, { dragging: state.dragging, vx: state.vx }, dt);
     state.swayX = swayState.x;
@@ -870,13 +875,13 @@ export function setupInteraction(): void {
     try {
       if (roamMode) {
         // 漫游模式：窗口铺满屏幕不能改大小，滚轮缩放的是**角色本身**
-        const z = fit.zoomBy(f);
+        const z = (fit as any).setZoomTarget(fit.getZoom() * f);
         try { window.localStorage.setItem('pet.roam.zoom', String(z)); } catch (e) {}
         // 放大到头不能被切头切脚
         try { fit.ensureVisible(); } catch (e) {}
       } else {
         // 普通模式也改成缩放角色本身（舞台窗口不动）：滚轮/快捷键都是相对倍率
-        const z = fit.zoomBy(f);
+        const z = (fit as any).setZoomTarget(fit.getZoom() * f);
         try { window.localStorage.setItem('pet.zoom', String(z)); } catch (e) {}
         scheduleEnsureVisible();
       }
@@ -958,8 +963,15 @@ export function setupInteraction(): void {
   let zoomEnsureTimer = 0;
   const scheduleEnsureVisible = () => {
     if (zoomEnsureTimer) window.clearTimeout(zoomEnsureTimer);
-    zoomEnsureTimer = window.setTimeout(() => {
+    zoomEnsureTimer = window.setTimeout(function again() {
       zoomEnsureTimer = 0;
+      // 缩放动画还没停就再等：否则贴边保险拿"半路的大小"算，会把她永久缩小一截
+      try {
+        if ((fit as any).isZoomAnimating?.()) {
+          zoomEnsureTimer = window.setTimeout(again, 250);
+          return;
+        }
+      } catch (e) {}
       try { fit.ensureVisible(); } catch (e) {}
     }, 400);
   };
@@ -967,7 +979,7 @@ export function setupInteraction(): void {
   (window as any).__petSetZoom = (z: number): number => {
     const v = Math.max(0.35, Math.min(1.4, Number(z) || 1));
     try {
-      fit.setZoom(v);
+      (fit as any).setZoomTarget(v);
       // 放大后可能贴边：让贴边保险收一下（异步，不阻塞调用方）
       scheduleEnsureVisible();
       localStorage.setItem('pet.zoom', String(fit.getZoom()));

@@ -292,9 +292,66 @@ export function createModelFit(deps: ModelFitDeps): ModelFit {
     }
   }
 
+  /**
+   * 画布实际能容下的最大倍率（含边距）。
+   * 用它**直接夹住目标倍率**，比"先放大、再靠异步的贴边保险缩回来"确定：
+   * 保险要等动画停、还要测量，节奏一乱就会拿半路的大小算，把她永久缩小一截。
+   */
+  function capForCanvas(): number {
+    try {
+      const rect = deps.getCanvas().getBoundingClientRect();
+      const H = Math.max(80, Math.round(rect.height));
+      const margin = Math.max(16, Math.round(H * 0.032));
+      // 倍率 1.0 时她占画布高度的 targetHeightRatio（默认 0.82）。
+      // 基准必须是**画布高度**：fitRef.H 是参考模型的画布坐标高（单位不同），
+      // 用它算出来的上限偏大，放大到顶按百分比量就会超 95%（切头）。
+      const baseH = (deps.targetHeightRatio ?? 0.82) * H;
+      const usable = Math.max(120, H - margin * 2);
+      return Math.max(0.35, Math.min(3.0, usable / Math.max(1, baseH)));
+    } catch (e) {
+      return 1.4;
+    }
+  }
+
+  // ── 连续缩放：业务只设目标，渲染循环每帧逼近 ────────────────
+  // 以前滚轮/快捷键把 zoom 直接改到位，看起来是一格一格跳；
+  // 现在连续滚动会合并成一次顺滑的放大/缩小，而且全程不碰窗口尺寸。
+  const ZOOM_TAU_MS = 130;
+  let targetZoom: number | null = null;
+
+  /** 设置缩放目标（不立即生效） */
+  function setZoomTarget(value: number): number {
+    const v = Math.max(0.35, Math.min(maxZoomAllowed(), capForCanvas(), Number(value) || 1));
+    targetZoom = v;
+    return v;
+  }
+
+  /** 每帧调用：把 zoom 向 target 逼近 */
+  function stepZoom(dtMs: number): number {
+    if (targetZoom === null) return zoom;
+    const dt = Math.max(1, Math.min(64, Number(dtMs) || 16));
+    const a = 1 - Math.exp(-dt / ZOOM_TAU_MS);
+    if (Math.abs(targetZoom - zoom) < 0.004) {
+      if (Math.abs(zoom - targetZoom) > 1e-4) {
+        zoom = targetZoom;
+        if (fitRef) applyFitInner(fitRef);
+      }
+      targetZoom = null;
+      return zoom;
+    }
+    zoom += (targetZoom - zoom) * a;
+    if (fitRef) applyFitInner(fitRef);
+    return zoom;
+  }
+
+  /** 缩放动画还没停？（贴边保险必须等它停） */
+  function isZoomAnimating(): boolean {
+    return targetZoom !== null;
+  }
+
   function zoomBy(factor: number): number {
     fitCorrection = 1;
-    const next = Math.max(0.35, Math.min(maxZoomAllowed(), zoom * Number(factor || 1)));
+    const next = Math.max(0.35, Math.min(maxZoomAllowed(), capForCanvas(), zoom * Number(factor || 1)));
     if (Math.abs(next - zoom) < 0.0001) return zoom;
     zoom = next;
     if (fitRef) applyFitInner(fitRef);
@@ -307,7 +364,7 @@ export function createModelFit(deps: ModelFitDeps): ModelFit {
 
   function setZoom(value: number): number {
     fitCorrection = 1;
-    zoom = Math.max(0.35, Math.min(maxZoomAllowed(), Number(value) || 1));
+    zoom = Math.max(0.35, Math.min(maxZoomAllowed(), capForCanvas(), Number(value) || 1));
     if (fitRef) applyFitInner(fitRef);
     return zoom;
   }
@@ -345,7 +402,8 @@ export function createModelFit(deps: ModelFitDeps): ModelFit {
       const buf = new Uint8Array(cw * ch * 4);
       gl.readPixels(0, 0, cw, ch, gl.RGBA, gl.UNSIGNED_BYTE, buf);
       const stride = Math.max(1, Math.round(cw / 420));
-      const alphaAt = (x: number, y: number) => buf[((y * cw) + x) * 4 + 3] > 16;
+      // 阈值 48：她的边缘有很淡的光晕（alpha 十几），阈值太低会把整块画布都算成她
+      const alphaAt = (x: number, y: number) => buf[((y * cw) + x) * 4 + 3] > 48;
       // 设备像素 → CSS 像素的换算（拿不到就用 1）
       const kx = W / cw;
       const ky = H / ch;
@@ -386,6 +444,8 @@ export function createModelFit(deps: ModelFitDeps): ModelFit {
    * 再用 6 帧逐次缩回去 —— 用户看到的就是"莫名变大又变回原大小"，每缩放一次闪一下。
    */
   async function ensureVisible(): Promise<boolean> {
+    // 缩放动画进行中别算：会拿"半路的大小"当基准，把她永久缩小一截
+    if (targetZoom !== null) return false;
     if (!fitRef) return false;
     let H = 200;
     try {
@@ -412,6 +472,8 @@ export function createModelFit(deps: ModelFitDeps): ModelFit {
     const artH = Math.max(1, H - e.top - e.bottom);
     const targetH = Math.max(1, H - margin * 2);
     let f = targetH / artH;                     // < 1 表示要缩小
+    // 差 3% 以内的抖动不要动她（每缩放一次都修掉几个百分点，档位会越来越小）
+    if (f > 0.97) return true;
     f = Math.max(0.5, Math.min(1.0, f));
     const next = Math.max(0.35, fitCorrection * f);
     if (Math.abs(next - fitCorrection) > 0.002) {
@@ -450,7 +512,7 @@ export function createModelFit(deps: ModelFitDeps): ModelFit {
     t.debugCorrection = () => fitCorrection;
     t.debugMaxZoom = () => maxZoomAllowed();
   })({ autoFit, rescaleForWindow, applyFit, getRef, getScale, isReady, invalidate, zoomBy, ensureVisible, getZoom, setZoom });
-  const api: any = { autoFit, rescaleForWindow, applyFit, getRef, getScale, isReady, invalidate, zoomBy, ensureVisible, getZoom, setZoom };
+  const api: any = { autoFit, rescaleForWindow, applyFit, getRef, getScale, isReady, invalidate, zoomBy, ensureVisible, getZoom, setZoom, stepZoom, setZoomTarget, isZoomAnimating, capForCanvas };
   api.debugZoom = () => zoom;
   api.debugCorrection = () => fitCorrection;
   api.debugMaxZoom = () => maxZoomAllowed();
