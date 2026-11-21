@@ -874,8 +874,11 @@ export function setupInteraction(): void {
         try { window.localStorage.setItem('pet.roam.zoom', String(z)); } catch (e) {}
         // 放大到头不能被切头切脚
         try { fit.ensureVisible(); } catch (e) {}
-      } else if (b.scaleBy) {
-        b.scaleBy(f);
+      } else {
+        // 普通模式也改成缩放角色本身（舞台窗口不动）：滚轮/快捷键都是相对倍率
+        const z = fit.zoomBy(f);
+        try { window.localStorage.setItem('pet.zoom', String(z)); } catch (e) {}
+        scheduleEnsureVisible();
       }
     } catch (err) {}
   };
@@ -940,12 +943,33 @@ export function setupInteraction(): void {
 
   // ── 舞台模式缩放：外壳只改这里的倍率，不再改窗口尺寸 ──────────
   // 舞台（窗口）固定大小，角色在里面缩放：连续、平滑，也不会有"旧画面被裁"的一帧。
+
+  // 相对缩放（滚轮 / 快捷键）：外壳只传系数，倍率由页面自己维护
+  (window as any).__petZoomBy = (f: number): number => {
+    const k = Number(f) || 1;
+    if (!Number.isFinite(k) || k <= 0) return fit.getZoom();
+    const z = fit.zoomBy(k);
+    try { localStorage.setItem('pet.zoom', String(z)); } catch (e) {}
+    scheduleEnsureVisible();
+    return z;
+  };
+  // 缩放防抖：连续滚轮/连按快捷键时，等最后一下停 400ms 再做一次贴边保险，
+  // 避免"保证在正确时机跑"的问题（之前偶尔跑在最后一次 zoomBy 之前，等于没跑）。
+  let zoomEnsureTimer = 0;
+  const scheduleEnsureVisible = () => {
+    if (zoomEnsureTimer) window.clearTimeout(zoomEnsureTimer);
+    zoomEnsureTimer = window.setTimeout(() => {
+      zoomEnsureTimer = 0;
+      try { fit.ensureVisible(); } catch (e) {}
+    }, 400);
+  };
+
   (window as any).__petSetZoom = (z: number): number => {
     const v = Math.max(0.35, Math.min(1.4, Number(z) || 1));
     try {
       fit.setZoom(v);
       // 放大后可能贴边：让贴边保险收一下（异步，不阻塞调用方）
-      try { (fit as any).ensureVisible?.(); } catch (e) {}
+      scheduleEnsureVisible();
       localStorage.setItem('pet.zoom', String(fit.getZoom()));
     } catch (e) {}
     return fit.getZoom();
@@ -1151,4 +1175,3 @@ export function setupInteraction(): void {
   register('fit', () => fit.autoFit());
   register('fitInfo', () => w.__fitInfo());
 }
-

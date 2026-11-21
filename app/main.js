@@ -522,8 +522,11 @@ function setupIpc() {
 
   ipcMain.on('pet:scale', (_e, k) => {
     const f = Number(k) || 1;
-    const g = geo.get();
-    applySize(g.w * f, g.h * f);
+    if (!Number.isFinite(f) || f <= 0 || f === 1) return;
+    // 滚轮是「相对」缩放：必须交给页面按当前倍率乘。
+    // 以前用窗口尺寸 × 系数 —— 舞台模式下窗口尺寸恒定，
+    // 每次滚轮都算到同一个目标倍率，所以她看起来滚不动。
+    runJs('window.__petZoomBy && window.__petZoomBy(' + f + ')').catch(() => {});
   });
 
   ipcMain.on('pet:drag-start', (_e, p) => {
@@ -788,10 +791,10 @@ function handleMenuAction(id) {
       openSettings();
       break;
     case 'size-up':
-      applySize(geo.get().w * 1.06, geo.get().h * 1.06);
+      runJs('window.__petZoomBy && window.__petZoomBy(1.06)').catch(() => {});
       break;
     case 'size-down':
-      applySize(geo.get().w / 1.06, geo.get().h / 1.06);
+      runJs('window.__petZoomBy && window.__petZoomBy(' + (1 / 1.06) + ')').catch(() => {});
       break;
     case 'roam': {
       const s = settingsStore.getSettings();
@@ -1715,7 +1718,9 @@ app.whenReady().then(() => {
       const ok = globalShortcut.register('Control+Alt+P', () => setInteractive(!interactive));
   // 缩放快捷键：Ctrl+Alt+= 放大 / Ctrl+Alt+- 缩小 / Ctrl+Alt+0 复位
   const scaleStep = (k) => {
-    const g = geo.get(); applySize(g.w * k, g.h * k);
+    if (!Number.isFinite(k) || k <= 0) return;
+    // 相对缩放：交给页面（它才知道当前倍率；窗口是固定舞台，不能用它算）
+    runJs('window.__petZoomBy && window.__petZoomBy(' + k + ')').catch(() => {});
   };
   globalShortcut.register('Control+Alt+=', () => scaleStep(1.04));
   globalShortcut.register('Control+Alt+-', () => scaleStep(1 / 1.04));

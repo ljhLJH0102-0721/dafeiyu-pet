@@ -324,6 +324,9 @@ export function createModelFit(deps: ModelFitDeps): ModelFit {
    * 比整张网格扫描便宜得多（几十次 readPixels 而不是三千多次）。
    */
   function probeEdges(): { top: number; bottom: number; left: number; right: number } | null {
+    // 一次读整块画布再在 CPU 上扫。
+    // 以前是"每个采样点一次 readPixels"——多点采样后单次要 1 秒以上，
+    // 贴边保险会赶不上最后一次缩放，于是偶尔不生效（放大到顶偶发切头就是这个）。
     let W = 0, H = 0;
     try {
       const rect = deps.getCanvas().getBoundingClientRect();
@@ -333,47 +336,46 @@ export function createModelFit(deps: ModelFitDeps): ModelFit {
       return null;
     }
     if (W < 40 || H < 40) return null;
-    const step = Math.max(2, Math.round(Math.min(W, H) / 160));
-    const on = deps.isOnCharacter;
-    // 每边采样多列/多行：只看中线会漏掉偏在一侧的头发/尾巴，
-    // 结果就是"检测说放得下，实际已经顶边"（放大到顶时切头就是这么来的）。
-    const TOP_X = [0.25, 0.4, 0.5, 0.6, 0.75];
-    const SIDE_Y = [0.3, 0.5, 0.7];
-
-    // 上
-    let top = H;
-    for (let y = 0; y < H; y += step) {
-      let hit = false;
-      for (const fx of TOP_X) {
-        if (on(W * fx, y)) { hit = true; break; }
+    try {
+      const c = deps.getCanvas() as any;
+      const gl = c.getContext('webgl2', { preserveDrawingBuffer: true }) as WebGL2RenderingContext | null;
+      if (!gl) return null;
+      const cw = Math.max(1, c.width | 0);
+      const ch = Math.max(1, c.height | 0);
+      const buf = new Uint8Array(cw * ch * 4);
+      gl.readPixels(0, 0, cw, ch, gl.RGBA, gl.UNSIGNED_BYTE, buf);
+      const stride = Math.max(1, Math.round(cw / 420));
+      const alphaAt = (x: number, y: number) => buf[((y * cw) + x) * 4 + 3] > 16;
+      // 设备像素 → CSS 像素的换算（拿不到就用 1）
+      const kx = W / cw;
+      const ky = H / ch;
+      let topY = -1, botY = -1, leftX = -1, rightX = -1;
+      // 行：记录第一条/最后一条有不透明像素的行（WebGL y 轴朝上）
+      for (let y = 0; y < ch; y += stride) {
+        let hit = false;
+        for (let x = 0; x < cw; x += stride) {
+          if (alphaAt(x, y)) { hit = true; break; }
+        }
+        if (hit) { if (topY < 0) topY = y; botY = y; }
       }
-      if (hit) { top = y; break; }
-    }
-    let bottom = H;
-    for (let y = H - 1; y >= 0; y -= step) {
-      let hit = false;
-      for (const fx of TOP_X) {
-        if (on(W * fx, y)) { hit = true; break; }
+      // 列
+      for (let x = 0; x < cw; x += stride) {
+        let hit = false;
+        for (let y = 0; y < ch; y += stride) {
+          if (alphaAt(x, y)) { hit = true; break; }
+        }
+        if (hit) { if (leftX < 0) leftX = x; rightX = x; }
       }
-      if (hit) { bottom = H - 1 - y; break; }
+      if (topY < 0 || leftX < 0) return null;
+      return {
+        top: Math.round((ch - 1 - botY) * ky),
+        bottom: Math.round(topY * ky),
+        left: Math.round(leftX * kx),
+        right: Math.round((cw - 1 - rightX) * kx),
+      };
+    } catch (e) {
+      return null;
     }
-    let left = W;
-    for (let x = 0; x < W; x += step) {
-      let hit = false;
-      for (const fy of SIDE_Y) {
-        if (on(x, H * fy)) { hit = true; break; }
-      }
-      if (hit) { left = x; break; }
-    }
-    let right = W;
-    for (let x = W - 1; x >= 0; x -= step) {
-      let hit = false;
-      for (const fy of SIDE_Y) {
-        if (on(x, H * fy)) { hit = true; break; }
-      }
-      if (hit) { right = W - 1 - x; break; }
-    }
-    return { top, bottom, left, right };
   }
 
   /**
