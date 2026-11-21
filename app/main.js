@@ -578,7 +578,8 @@ function setupIpc() {
    */
   function startDragLoop() {
     if (drag.timer) return;
-    const TAU = 34;
+    // 时间常数 12ms：实测追 150px 约 40ms 到位（34ms 时要 170ms，手感发粘）
+    const TAU = 12;
     drag.timer = setInterval(() => {
       if (!drag.active || !win || win.isDestroyed()) {
         clearInterval(drag.timer);
@@ -588,7 +589,7 @@ function setupIpc() {
       const cur = screen.getCursorScreenPoint();
       const targetX = cur.x - drag.gx;
       const targetY = cur.y - drag.gy;
-      const a = 1 - Math.exp(-13 / TAU);
+      const a = 1 - Math.exp(-10 / TAU);
       drag.px += (targetX - drag.px) * a;
       drag.py += (targetY - drag.py) * a;
       const x = Math.round(drag.px);
@@ -615,7 +616,7 @@ function setupIpc() {
       dragWrites++;
       geo.moveTo(cx, cy);
       try { win.webContents.send('pet:drag-info', { vx, vy }); } catch (e) {}
-    }, 13);
+    }, 10);
   }
 
   // 拖动：页面侧弹簧算好的绝对窗口位置（每帧一次）。
@@ -1113,6 +1114,8 @@ let ignoreToggles = 0;          // 调试用：切换了多少次
 let hitTests = 0;               // 调试用：做了多少次命中检测
 
 function applyIgnore(next, force) {
+  // 拖动中绝不切成穿透：Windows 会因此丢掉鼠标捕获，mouseup 收不到，拖到一半就断
+  if (next && drag.active) return;
   if (!win || win.isDestroyed()) return;
   const now = Date.now();
   if (next !== ignoringNow) log('[ignore]', ignoringNow ? '穿透' : '可交互', '→', next ? '穿透' : '可交互', force ? '(强制)' : '');
@@ -1189,6 +1192,9 @@ function startHitTestLoop() {
     cmd('hitTest', { x: cx, y: cy })
       .then((hit) => {
         if (token !== hitToken) return;   // 有更新的一次检测了，丢弃旧结果
+        // 拖动已经开始：这次结果是"按下之前"发起的，作废。
+        // 否则它会把窗口切成穿透 → 鼠标捕获丢失 → 拖动立刻中断（体感：拖不动/粘手）
+        if (drag.active) return;
         // 非对称防抖：
         //   命中（光标确实落在她身上）→ 立刻切成可交互，否则用户一按下就落到桌面上；
         //   落空（透明处）→ 仍然防抖两次，避免边界抖动导致窗口状态来回闪。
