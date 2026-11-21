@@ -758,6 +758,8 @@ function setupIpc() {
 // ── 自绘右键菜单（蓝白圆角，跟着鼠标弹） ──────────────────
 const EXPRESSIONS = ['脸红', '爱心眼', '＞＜', '兔牙', '屑屑眼', '圈圈眼', '黑脸', '流泪', '流冷汗'];
 const MOTIONS = ['举手', '放手', '竖手指开', '竖手指关', '狗尾草开', '狗尾草关'];
+// 菜单里用的短标签（id 必须还是完整动作名，motion 分组名不能改）
+const MOTION_LABELS = { '竖手指开': '竖指开', '竖手指关': '竖指关', '狗尾草开': '狗尾开', '狗尾草关': '狗尾关' };
 
 function buildMenuData() {
   const s = settingsStore.getSettings();
@@ -768,43 +770,54 @@ function buildMenuData() {
       { id: 'hello', label: '打个招呼', icon: '👋' },
       { id: 'pat', label: '摸摸头', icon: '♡' },
       { sep: true },
-      { id: 'miccheck', label: '麦克风自检', icon: '🎤' },
-      { sep: true },
-      { id: 'g-exp', label: '表情', icon: '', chips: EXPRESSIONS.map((n) => ({ id: 'exp:' + n, label: n })) },
-      { id: 'g-mot', label: '动作', icon: '', chips: MOTIONS.map((n) => ({ id: 'mot:' + n, label: n })) },
+      // 表情 / 动作 / 外观：三组胶囊，顺序固定（先表情、再动作、最后外观）
+      { id: 'g-exp', label: '表情', icon: '😊', chips: EXPRESSIONS.map((n) => ({ id: 'exp:' + n, label: n })) },
+      { id: 'g-mot', label: '动作', icon: '🙋', chips: MOTIONS.map((n) => ({ id: 'mot:' + n, label: MOTION_LABELS[n] || n })) },
       // 原皮自带的服装/配件开关（Exp3 里那些开关型表情，本质是 Clothes*/key*/Movement* 参数）
       {
         id: 'g-wardrobe',
         label: '外观',
         icon: '👗',
         chips: [
-          { id: 'wd:skirt', label: '换裙子' },
+          { caption: '衣服' },
+          { id: 'wd:skirt', label: '换裙' },
           { id: 'wd:tail', label: '尾巴' },
-          { id: 'wd:chest', label: '胸口衣服' },
+          { id: 'wd:chest', label: '胸口衣' },
           { id: 'wd:shoes', label: '脱鞋' },
-          { id: 'wd:body-default', label: '默认体型' },
+          { caption: '体型' },
+          { id: 'wd:body-default', label: '默认体' },
           { id: 'wd:body1', label: '体型1' },
           { id: 'wd:body2', label: '体型2' },
-          { id: 'wd:glasses-none', label: '无眼镜' },
-          { id: 'wd:glassesBlack', label: '黑框眼镜' },
-          { id: 'wd:glassesMono', label: '单片眼镜' },
+          { caption: '眼镜' },
+          { id: 'wd:glasses-none', label: '不戴' },
+          { id: 'wd:glassesBlack', label: '黑框' },
+          { id: 'wd:glassesMono', label: '单片' },
+          { caption: '配件' },
           { id: 'wd:bowl', label: '钢盆' },
-          { id: 'wd:loading', label: '加载条' },
-          { id: 'wd:point', label: '竖食指' },
+          { id: 'wd:loading', label: '加载' },
+          { id: 'wd:point', label: '竖指' },
         ],
       },
       { sep: true },
+      { id: 'miccheck', label: '麦克风自检', icon: '🎤' },
       // 插件贡献的菜单项（创意工坊里装的）
       ...pluginHost.menuItems(),
       { id: 'workshop', label: '创意工坊', icon: '🧩' },
       { sep: true },
-      { id: 'settings', label: '设置…', icon: '⚙' },
-      { id: 'size-up', label: '大一点', icon: '⤢' },
-      { id: 'size-down', label: '小一点', icon: '⤡' },
-      { id: 'center', label: '回到屏幕中央', icon: '◎' },
-      { sep: true },
-      { id: 'hide', label: '隐藏她', icon: '◡' },
-      { id: 'quit', label: '退出', icon: '×', danger: true },
+      // 系统操作也收成胶囊：原本竖排 5 行太占高度，底部容易被任务栏挡
+      {
+        id: 'g-sys',
+        label: '系统',
+        icon: '⚙',
+        chips: [
+          { id: 'settings', label: '设置' },
+          { id: 'size-up', label: '大一点' },
+          { id: 'size-down', label: '小一点' },
+          { id: 'center', label: '居中' },
+          { id: 'hide', label: '隐藏' },
+          { id: 'quit', label: '退出' },
+        ],
+      },
     ],
   };
 }
@@ -1051,7 +1064,11 @@ ipcMain.on('menu:resize', (_e, size) => {
   try {
     if (!menuWin || menuWin.isDestroyed()) return;
     const b = menuWin.getBounds();
-    const h = Math.max(160, Math.min(720, Math.round((size && size.h) || 420)));
+    // 上限跟屏幕走：比工作区矮 80px，保证底部（退出）永远点得到
+    let maxH = 720;
+    // 留够上下边距（菜单还要夹在下半屏之上），否则底部几项会被任务栏挡掉
+    try { maxH = Math.max(320, Math.min(860, screen.getPrimaryDisplay().workAreaSize.height - 24)); } catch (e) {}
+    const h = Math.max(160, Math.min(maxH, Math.round((size && size.h) || 420)));
     // 宽度写死：菜单内容宽度是「窗口宽度 100%」，量出来再设回去会自我放大（越点越宽）
     const w = 276;
     // 变高之后重新夹一次，保证整块菜单都在可见桌面内

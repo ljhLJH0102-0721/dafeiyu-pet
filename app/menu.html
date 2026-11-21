@@ -25,7 +25,7 @@
     box-shadow: 0 18px 46px rgba(23, 43, 99, .24), 0 0 0 1px rgba(47, 107, 255, .12);
     display: flex; flex-direction: column; gap: 2px;
     width: 100%;
-    max-height: 720px;
+    max-height: 900px;
     overflow-y: auto;
   }
   .menu::-webkit-scrollbar { width: 6px; }
@@ -57,14 +57,34 @@
   .item.danger:hover { background: #fff1f1; color: #d92d20; }
   .sep { height: 1px; background: rgba(228, 235, 247, .9); margin: 4px 6px; }
 
-  /* 表情 / 动作的小胶囊 */
-  .chips { display: flex; flex-wrap: wrap; gap: 5px; padding: 2px 9px 7px 34px; }
+  /* 表情 / 动作 / 外观：三列等宽网格，排整齐 */
+  .chips {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 5px;
+    padding: 2px 9px 8px 30px;
+  }
   .chip {
-    padding: 3px 9px; border-radius: 999px; font-size: 11.5px; cursor: pointer;
+    padding: 3px 4px; border-radius: 7px; font-size: 11px; cursor: pointer;
     background: #f1f6ff; color: #41628f; border: 1px solid #e2ecfb;
     transition: all .12s; white-space: nowrap;
+    text-align: center; overflow: hidden; text-overflow: ellipsis;
   }
   .chip:hover { background: var(--blue); border-color: var(--blue); color: #fff; }
+  /* 小标题：占满一行，把胶囊按类别隔开 */
+  .chip.cap {
+    grid-column: 1 / -1;
+    background: transparent; border: none; cursor: default;
+    color: #8aa0c4; font-size: 10px; padding: 3px 0 0; text-align: left; letter-spacing: .5px;
+  }
+  .chip.cap:hover { background: transparent; border-color: transparent; color: #8aa0c4; }
+  /* 紧凑化：菜单项多，压一压行高和间距 */
+  .head { padding: 4px 9px 6px; }
+  .item { padding: 4px 9px; }
+  .chips { gap: 4px; padding: 1px 9px 6px 30px; }
+  .chip { padding: 2px 3px; font-size: 10.8px; }
+  .chip.cap { padding: 2px 0 0; }
+  .sep { margin: 3px 6px; }
 </style>
 </head>
 <body>
@@ -109,6 +129,12 @@
         box.className = 'chips';
         for (const c of it.chips) {
           const chip = document.createElement('span');
+          if (c.caption) {
+            chip.className = 'chip cap';
+            chip.textContent = c.caption;
+            box.appendChild(chip);
+            continue;
+          }
           chip.className = 'chip';
           chip.textContent = c.label;
           chip.addEventListener('click', () => window.petMenu.act(c.id));
@@ -125,8 +151,12 @@
     const MENU_WIDTH = 272;
     const doResize = () => {
       const m = $('menu');
-      // scrollHeight 是内容实际高度（不受窗口当前高度影响）
-      const h = Math.min(720, Math.max(160, Math.ceil(m.scrollHeight) + 2));
+      // 必须先把高度放开成 auto 再量：窗口本身固定高度时 scrollHeight 至少等于可视高度，
+      // 量出来永远是上一次的值（只涨不缩，菜单会一直卡在 720）。
+      const keep = m.style.height;
+      m.style.height = 'auto';
+      const h = Math.min(720, Math.max(160, Math.ceil(m.getBoundingClientRect().height) + 18));
+      m.style.height = keep;
       window.petMenu.resize(h, MENU_WIDTH);
     };
     requestAnimationFrame(() => requestAnimationFrame(doResize));
