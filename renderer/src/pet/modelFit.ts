@@ -72,6 +72,14 @@ const MAX_ATTEMPTS = 5;
 export function createModelFit(deps: ModelFitDeps): ModelFit {
   let fitting = false;
   let zoom = 1;          // 角色缩放倍数（漫游模式里滚轮改的是这个，不是窗口）
+  // 逻辑高度封顶：只在全屏漫游时生效（普通模式舞台是固定的，封顶会把她永久缩小）
+  let maxLogicalH = Math.max(0, Number(deps.maxLogicalHeight) || 0);
+  /** 切漫游/普通时由页面调用：漫游 760，普通 0（不封顶） */
+  function setMaxLogicalHeight(v: number): number {
+    maxLogicalH = Math.max(0, Number(v) || 0);
+    if (fitRef) applyFitInner(fitRef);
+    return maxLogicalH;
+  }
   // 贴边保险的临时修正：只是「这一次」缩一点，不能吃掉用户的 zoom。
   // 以前直接把 zoom 乘 0.92，结果每次放大都被永久缩小回去（重启 DSH 那种高负载时会误触发）。
   let fitCorrection = 1;
@@ -94,7 +102,7 @@ export function createModelFit(deps: ModelFitDeps): ModelFit {
 
   /** 拟合用的"逻辑高度"：全屏漫游时封顶，避免她变成整屏那么大 */
   function logicalHeight(realH: number): number {
-    const cap = deps.maxLogicalHeight || 0;
+    const cap = maxLogicalH;
     return cap > 0 ? Math.min(realH, cap) : realH;
   }
 
@@ -264,7 +272,7 @@ export function createModelFit(deps: ModelFitDeps): ModelFit {
     // 这里再乘一次 H/fitRef.H 等于缩了两次：窗口从 807 缩到 586 时她会只有原来的 55%
     // （实测占画布 82.5% → 62.5%），随后贴边保险又反过来修，就成了"放大一下又变小"。
     // 只有漫游模式（逻辑高度被封顶）才需要按 cap/H 缩。
-    const cap = deps.maxLogicalHeight || 0;
+    const cap = maxLogicalH;
     const k = cap > 0 && realH > cap ? cap / realH : 1;
     // 即使尺寸"变回原值"也要重写矩阵，否则滚轮预览留下的缩放会留在身上（看起来她变小了）
     const kk = zoom * fitCorrection;
@@ -281,7 +289,7 @@ export function createModelFit(deps: ModelFitDeps): ModelFit {
     try {
       const rect = deps.getCanvas().getBoundingClientRect();
       const canvasH = Math.max(80, rect.height);
-      const baseH = (fitRef ? fitRef.H : (deps.maxLogicalHeight || canvasH)) * 0.82;
+      const baseH = (fitRef ? fitRef.H : (maxLogicalH || canvasH)) * 0.82;
       // 舞台模式下窗口尺寸固定、缩放靠倍率，所以上限不能再按"80% 画布"卡死
       // （那样 520x760 / 640x900 这些档位会全部撞到同一个上限，看起来"放不大"）。
       // 放开到 1.4，超出画布的部分由 ensureVisible 一次算到位地收回来。
@@ -512,7 +520,7 @@ export function createModelFit(deps: ModelFitDeps): ModelFit {
     t.debugCorrection = () => fitCorrection;
     t.debugMaxZoom = () => maxZoomAllowed();
   })({ autoFit, rescaleForWindow, applyFit, getRef, getScale, isReady, invalidate, zoomBy, ensureVisible, getZoom, setZoom });
-  const api: any = { autoFit, rescaleForWindow, applyFit, getRef, getScale, isReady, invalidate, zoomBy, ensureVisible, getZoom, setZoom, stepZoom, setZoomTarget, isZoomAnimating, capForCanvas };
+  const api: any = { autoFit, rescaleForWindow, applyFit, getRef, getScale, isReady, invalidate, zoomBy, ensureVisible, getZoom, setZoom, stepZoom, setZoomTarget, isZoomAnimating, capForCanvas, setMaxLogicalHeight };
   api.debugZoom = () => zoom;
   api.debugCorrection = () => fitCorrection;
   api.debugMaxZoom = () => maxZoomAllowed();

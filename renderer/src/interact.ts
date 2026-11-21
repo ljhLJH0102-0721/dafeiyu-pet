@@ -233,6 +233,9 @@ export function setupInteraction(): void {
     if (b0.onOptions) {
       b0.onOptions((opt: any) => {
         roamMode = !!opt.roamMode;
+      // 普通模式不封顶逻辑高度：舞台本身是固定的，按 760 封顶会把她永久缩小 4~5%
+      // （拖动时窗口高在 796/798 之间来回跳，就会一会大一会小）
+      try { (fit as any).setMaxLogicalHeight?.(roamMode ? 760 : 0); } catch (e) {}
         if (roamMode) {
           try {
             const z = window.localStorage.getItem('pet.roam.zoom');
