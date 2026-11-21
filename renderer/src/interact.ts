@@ -878,7 +878,7 @@ export function setupInteraction(): void {
         const z = (fit as any).setZoomTarget(fit.getZoom() * f);
         try { window.localStorage.setItem('pet.roam.zoom', String(z)); } catch (e) {}
         // 放大到头不能被切头切脚
-        try { fit.ensureVisible(); } catch (e) {}
+        if (roamMode) { try { fit.ensureVisible(); } catch (e) {} }
       } else {
         // 普通模式也改成缩放角色本身（舞台窗口不动）：滚轮/快捷键都是相对倍率
         const z = (fit as any).setZoomTarget(fit.getZoom() * f);
@@ -935,16 +935,16 @@ export function setupInteraction(): void {
       if (Date.now() - lastResizeAt < 450) {
         ensureTimer = window.setTimeout(() => {
           ensureTimer = 0;
-          try { fit.ensureVisible(); } catch (e) {}
+          if (roamMode) { try { fit.ensureVisible(); } catch (e) {} }
         }, 450);
         return;
       }
       ensureTimer = 0;
-      try { fit.ensureVisible(); } catch (e) {}
+      if (roamMode) { try { fit.ensureVisible(); } catch (e) {} }
     }, 550);
   });
   // 启动时也检查一次（缓存里的适配结果可能来自更小的窗口）
-  window.setTimeout(() => { try { fit.ensureVisible(); } catch (e) {} }, 1200);
+  window.setTimeout(() => { if (roamMode) { try { fit.ensureVisible(); } catch (e) {} } }, 1200);
 
   // ── 舞台模式缩放：外壳只改这里的倍率，不再改窗口尺寸 ──────────
   // 舞台（窗口）固定大小，角色在里面缩放：连续、平滑，也不会有"旧画面被裁"的一帧。
@@ -953,7 +953,8 @@ export function setupInteraction(): void {
   (window as any).__petZoomBy = (f: number): number => {
     const k = Number(f) || 1;
     if (!Number.isFinite(k) || k <= 0) return fit.getZoom();
-    const z = fit.zoomBy(k);
+    // 只设目标：渲染循环每帧逼近（连续缩放的关键）
+    const z = (fit as any).setZoomTarget(fit.getZoom() * k);
     try { localStorage.setItem('pet.zoom', String(z)); } catch (e) {}
     scheduleEnsureVisible();
     return z;
@@ -972,7 +973,7 @@ export function setupInteraction(): void {
           return;
         }
       } catch (e) {}
-      try { fit.ensureVisible(); } catch (e) {}
+      if (roamMode) { try { fit.ensureVisible(); } catch (e) {} }
     }, 400);
   };
 
