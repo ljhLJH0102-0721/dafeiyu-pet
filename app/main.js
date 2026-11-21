@@ -559,9 +559,14 @@ function setupIpc() {
     drag.lx = p.x; drag.ly = p.y; drag.lt = Date.now();
     drag.tx = -99999; drag.ty = -99999;   // 复位去重基准
     // 抓取偏移：光标 - 窗口位置。之后每帧用「当前光标 - 抓取偏移」算目标。
+    // 用页面上报的 p.x/p.y（mousedown 那一刻的 screenX/Y），不要用
+    // screen.getCursorScreenPoint()：光标刚瞬移过来时它可能还是旧值，
+    // 偏移就会算错 → 拖动方向反了/拖不动（实测抓到过）。
     const cur = screen.getCursorScreenPoint();
-    drag.gx = cur.x - b.x;
-    drag.gy = cur.y - b.y;
+    const grabX = Number.isFinite(p.x) ? p.x : cur.x;
+    const grabY = Number.isFinite(p.y) ? p.y : cur.y;
+    drag.gx = grabX - b.x;
+    drag.gy = grabY - b.y;
     drag.px = b.x; drag.py = b.y;
     startDragLoop();
     log('[drag] start geo=', g.w, g.h);
@@ -578,8 +583,10 @@ function setupIpc() {
    */
   function startDragLoop() {
     if (drag.timer) return;
-    // 时间常数 12ms：实测追 150px 约 40ms 到位（34ms 时要 170ms，手感发粘）
-    const TAU = 12;
+    // 刚性跟手：不做平滑。窗口移动由 100Hz 循环 + 去重控制，
+    // 再叠一层指数平滑只会引入延迟（用户体感就是"粘"）。
+    // 想恢复一点柔顺感，把 TAU 改成 8~12 即可。
+    const TAU = 0;
     drag.timer = setInterval(() => {
       if (!drag.active || !win || win.isDestroyed()) {
         clearInterval(drag.timer);
@@ -589,7 +596,7 @@ function setupIpc() {
       const cur = screen.getCursorScreenPoint();
       const targetX = cur.x - drag.gx;
       const targetY = cur.y - drag.gy;
-      const a = 1 - Math.exp(-10 / TAU);
+      const a = TAU > 0 ? 1 - Math.exp(-10 / TAU) : 1;
       drag.px += (targetX - drag.px) * a;
       drag.py += (targetY - drag.py) * a;
       const x = Math.round(drag.px);
@@ -608,7 +615,6 @@ function setupIpc() {
       if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(g.w) || !Number.isFinite(g.h)) return;
       // 舞台模式：窗口比她大，按「窗口中心」夹 —— 中心最多贴到离屏幕边 80px，
       // 她最多挂出去一点，不会被整只拖到屏幕外（以前按窗口边夹，大窗口能拖没）。
-      const keep = 90;
       const margin = 80;
       const cx = Math.max(margin - g.w / 2, Math.min(d.width - margin - g.w / 2, x));
       const cy = Math.max(margin - g.h / 2, Math.min(d.height - margin - g.h / 2, y));
@@ -1110,6 +1116,8 @@ function noteResizeCooldown() {
 }
 let forceNextHit = false;   // 刚唤回时：第一次检测结果直接生效，不等防抖              // 窗口正在改尺寸的这段时间不做命中检测
 let lastCursor = { x: -1, y: -1 };
+// 上一次"命中她"时的光标位置（用来判断"没命中"是不是光标没动导致旧结果）
+let lastCursorHit = { x: -1, y: -1 };
 let ignoreToggles = 0;          // 调试用：切换了多少次
 let hitTests = 0;               // 调试用：做了多少次命中检测
 
@@ -1197,16 +1205,22 @@ function startHitTestLoop() {
         if (drag.active) return;
         // 非对称防抖：
         //   命中（光标确实落在她身上）→ 立刻切成可交互，否则用户一按下就落到桌面上；
-        //   落空（透明处）→ 仍然防抖两次，避免边界抖动导致窗口状态来回闪。
+        //   落空（透明处）→ 仍然防抖，避免边界抖动导致窗口状态来回闪。
+        // 另外：光标**没动**时，这次"没命中"多半是窗口刚移动/刚重绘导致的旧结果，
+        // 此时不许把"可交互"翻成"穿透" —— 否则鼠标在她身上也会被切成穿透，
+        // 体感就是"手一停就拖不动了 / 发粘"。
+        const movedSinceHit = Math.abs(p.x - lastCursorHit.x) > 2 || Math.abs(p.y - lastCursorHit.y) > 2;
+        if (!hit && lastHitBody && !movedSinceHit) return;
         forceNextHit = false;
         lastHitBody = !!hit;
+        if (hit) lastCursorHit = { x: p.x, y: p.y };
         applyIgnore(!hit, !!hit);
       })
       .catch(() => {
         // 页面没响应时宁可放行鼠标：挡住整个桌面比点不到她严重得多
         try { applyIgnore(true); } catch (e) {}
       });
-  }, 90);
+  }, 60);
 }
 
 // ── 托盘 ──────────────────────────────────────────────────

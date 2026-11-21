@@ -65,10 +65,10 @@ let lastOnCharAt = 0;
 let lastOnChar = false;
 function isOnCharacterThrottled(clientX: number, clientY: number): boolean {
   const now = performance.now();
-  if (now - lastOnCharAt < 80) return lastOnChar;
-  lastOnCharAt = now;
-  lastOnChar = isOnCharacter(clientX, clientY);
-  return lastOnChar;
+  // click-through 时用更短的节流：要赶在用户按下之前把窗口变成可交互，
+  // 否则"手一移上来就按"会落到桌面上（体感：粘 / 拖不动）
+  const minGap = ignoring ? 25 : 80;
+  if (now - lastOnCharAt < minGap) return lastOnChar;
 }
 
 function setParam(name: string, value: number): void {
@@ -378,6 +378,11 @@ export function setupInteraction(): void {
       const on = isOnCharacterThrottled(ev.clientX, ev.clientY);
       diag.hitChecks++;
       if (on) diag.hits++;
+      // 快速接管：光标一落到她身上就立刻让窗口接收鼠标。
+      // 只做"打开"这一个方向（关掉仍由外壳的全局轮询决定），两边不会打架。
+      // 为什么需要：外壳 90ms 一轮询 + 异步命中，指针飞快移上来、立刻按下时，
+      // 这一下会落到桌面上 → 体感"拖不动/粘"。
+      if (on && ignoring) setIgnore(false);
       // 鼠标「刚碰到她」→ 抖一下 / 歪个头，表示被摸到了
       // 鼠标「停在」她身上 250ms 才算摸到（只是路过不算），冷却 6 秒
       if (on && !state.onChar && !state.dragging) {
