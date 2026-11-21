@@ -47,6 +47,36 @@ function createWindowState({ screen, fs, posPath, defaults, log }) {
     return Math.round(Math.round(v * dpr) / dpr);
   }
 
+  /**
+   * 唯一的窗口写入出口：先校验再 setBounds。
+   *
+   * 为什么需要：拖动/缩放是高频路径，只要有一环算出 NaN 或负数，
+   * BrowserWindow.setBounds 就会抛 "conversion failure"，主进程直接弹窗崩掉
+   * （用户那边已经遇到两次）。这里把非法值挡在最后一道门外。
+   */
+  function safeSetBounds(b) {
+    if (!alive()) return false;
+    const nb = {
+      x: Math.round(Number(b && b.x)),
+      y: Math.round(Number(b && b.y)),
+      width: Math.round(Number(b && b.width)),
+      height: Math.round(Number(b && b.height)),
+    };
+    if (!Number.isFinite(nb.x) || !Number.isFinite(nb.y) ||
+        !Number.isFinite(nb.width) || !Number.isFinite(nb.height) ||
+        nb.width < 40 || nb.height < 40) {
+      logger('[geo] 跳过非法 bounds', JSON.stringify(b));
+      return false;
+    }
+    try {
+      win.setBounds(nb);
+      return true;
+    } catch (e) {
+      logger('[geo] setBounds 失败', String(e));
+      return false;
+    }
+  }
+
   function clampSize(w, h) {
     const { wa } = display();
     const maxW = Math.min(MAX_W, wa.width - 20);
@@ -134,7 +164,7 @@ function createWindowState({ screen, fs, posPath, defaults, log }) {
       st.h = wa.height;
       if (alive()) {
         try { win.setResizable(false); } catch (e) {}
-        win.setBounds({ x: 0, y: 0, width: st.w, height: st.h });
+        safeSetBounds({ x: 0, y: 0, width: st.w, height: st.h });
       }
       logger('[geo] 进入全屏漫游', st.w + 'x' + st.h);
     } else {
@@ -148,7 +178,7 @@ function createWindowState({ screen, fs, posPath, defaults, log }) {
       st.y = p.y;
       if (alive()) {
         try { win.setResizable(true); } catch (e) {}
-        win.setBounds({ x: st.x, y: st.y, width: st.w, height: st.h });
+        safeSetBounds({ x: st.x, y: st.y, width: st.w, height: st.h });
       }
       logger('[geo] 退出全屏漫游', st.w + 'x' + st.h);
     }
@@ -169,7 +199,7 @@ function createWindowState({ screen, fs, posPath, defaults, log }) {
     st.h = wa.height;
     st.x = 0;
     st.y = 0;
-    try { win.setBounds({ x: 0, y: 0, width: st.w, height: st.h }); } catch (e) {}
+    try { safeSetBounds({ x: 0, y: 0, width: st.w, height: st.h }); } catch (e) {}
     logger('[geo] 漫游窗口已钉回', st.w + 'x' + st.h);
     return true;
   }
@@ -214,7 +244,7 @@ function createWindowState({ screen, fs, posPath, defaults, log }) {
       const p = clampPosition(st.x, st.y, st.w, st.h);
       st.x = p.x;
       st.y = p.y;
-      win.setBounds({ x: st.x, y: st.y, width: st.w, height: st.h });
+      safeSetBounds({ x: st.x, y: st.y, width: st.w, height: st.h });
     }
     return true;
   }
@@ -233,13 +263,14 @@ function createWindowState({ screen, fs, posPath, defaults, log }) {
       if (!Number.isFinite(st.w) || !Number.isFinite(st.h)) return { x: st.x, y: st.y };
     }
     const p = clampPosition(x, y, st.w, st.h);
+    if (!Number.isFinite(p.x) || !Number.isFinite(p.y)) return { x: st.x, y: st.y };
     st.x = p.x;
     st.y = p.y;
     if (!alive()) return { x: st.x, y: st.y };
     if (keepSize) {
       // 一次 setBounds 同时钉住尺寸：只调 setPosition 时 Windows 会为了保持
       // 客户区而反推窗口大小，拖几次就变大 1px。
-      win.setBounds({ x: st.x, y: st.y, width: st.w, height: st.h });
+      safeSetBounds({ x: st.x, y: st.y, width: st.w, height: st.h });
     } else {
       win.setPosition(st.x, st.y);
     }

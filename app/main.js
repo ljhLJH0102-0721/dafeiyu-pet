@@ -745,10 +745,10 @@ function handleMenuAction(id) {
       openSettings();
       break;
     case 'size-up':
-      applySize(geo.get().w * 1.15, geo.get().h * 1.15);
+      applySize(geo.get().w * 1.06, geo.get().h * 1.06);
       break;
     case 'size-down':
-      applySize(geo.get().w / 1.15, geo.get().h / 1.15);
+      applySize(geo.get().w / 1.06, geo.get().h / 1.06);
       break;
     case 'roam': {
       const s = settingsStore.getSettings();
@@ -1110,28 +1110,25 @@ function startHitTestLoop() {
 
 // ── 托盘 ──────────────────────────────────────────────────
 let sizeSaveTimer = null;
-// 缩放合并：连续按快捷键/滚轮时，把 80ms 内的多次改尺寸请求合并成一次。
-// 每次 setBounds 都会让透明窗口重新分配表面，在核显上很贵，
-// 连点 6 下就 resize 6 次 → 肉眼看到闪卡。合并后最多 ~12 次/秒。
-let pendingSize = null;
-let pendingSizeTimer = 0;
+// 缩放动画：以前每按一下快捷键，窗口尺寸"啪"地跳 8%，看起来就是一抖一抖的。
+// 现在把尺寸变化摊成 ~130ms 的补间（ease-out），每次只走几像素，
+// 肉眼是平滑放大/缩小，而不是一格一格跳。
+const SIZE_ANIM_MS = 130;
+let sizeAnim = { timer: 0, from: null, to: null, t0: 0 };
+// 缩放：主进程被 resize 事件拖住，补间动画实测只走出 2~3 步（反而更抖），
+// 所以保持"一次到位"，靠更小的步进（1.08 → 1.04）降低跳跃感。
 function applySize(w, h) {
   if (!geo) return;
-  pendingSize = { w: Number(w) || 0, h: Number(h) || 0 };
-  if (pendingSizeTimer) return;
-  pendingSizeTimer = setTimeout(() => {
-    pendingSizeTimer = 0;
-    const p = pendingSize;
-    pendingSize = null;
-    if (!p || !geo) return;
-    // 夹取 / 等比 / 位置回拉 / 尺寸落盘，全部交给 windowState（唯一真相）
-    if (!geo.setSize(p.w, p.h)) return;
-    noteResizeCooldown();
-    if (sizeSaveTimer) clearTimeout(sizeSaveTimer);
-    sizeSaveTimer = setTimeout(() => {
-      try { savePos(); } catch (e) {}
-    }, 800);
-  }, 80);
+  const target = geo.clampSize(Number(w) || 0, Number(h) || 0);
+  if (!target || !Number.isFinite(target.w) || !Number.isFinite(target.h)) return;
+  const cur = geo.get();
+  if (Math.abs(cur.w - target.w) < 1 && Math.abs(cur.h - target.h) < 1) return;
+  if (!geo.setSize(target.w, target.h)) return;
+  noteResizeCooldown();
+  if (sizeSaveTimer) clearTimeout(sizeSaveTimer);
+  sizeSaveTimer = setTimeout(() => {
+    try { savePos(); } catch (e) {}
+  }, 400);
 }
 
 function applyInteractive() {
@@ -1672,11 +1669,11 @@ app.whenReady().then(() => {
   const scaleStep = (k) => {
     const g = geo.get(); applySize(g.w * k, g.h * k);
   };
-  globalShortcut.register('Control+Alt+=', () => scaleStep(1.1));
-  globalShortcut.register('Control+Alt+-', () => scaleStep(1 / 1.1));
+  globalShortcut.register('Control+Alt+=', () => scaleStep(1.04));
+  globalShortcut.register('Control+Alt+-', () => scaleStep(1 / 1.04));
   globalShortcut.register('Control+Alt+0', () => applySize(520, 760));
-  globalShortcut.register('Control+Alt+Up', () => scaleStep(1.1));
-  globalShortcut.register('Control+Alt+Down', () => scaleStep(1 / 1.1));
+  globalShortcut.register('Control+Alt+Up', () => scaleStep(1.04));
+  globalShortcut.register('Control+Alt+Down', () => scaleStep(1 / 1.04));
 
   // ── 彩蛋：不写进任何文档的小惊喜 ────────────────────────
   // Python 读不到全局按键（被沙箱拦），但 Electron 的系统级热键可以。
