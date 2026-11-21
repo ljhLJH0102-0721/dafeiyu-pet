@@ -53,7 +53,9 @@ function createWindowState({ screen, fs, posPath, defaults, log }) {
     const maxH = Math.min(MAX_H, wa.height - 20);
     // 宽高比一律沿用**当前**窗口形状：桌宠变形没有意义，
     // 而按请求的 w/h 取比例会让 /size {600,600} 这种请求把她拉成方块。
-    const ar = st.w / st.h;
+    // 宽高比必须有限：一旦 st.w/st.h 被塞进 NaN，后面的 Math.round(nw / ar) 会全变 NaN，
+    // setBounds 收到 NaN 会直接抛 "conversion failure"（主进程弹窗崩掉）。
+    const ar = (Number.isFinite(st.w) && Number.isFinite(st.h) && st.h > 0) ? st.w / st.h : 0.68;
     // 以请求尺寸里较大的那个量纲为主，另一维按比例推出来（永远锁形状）
     const baseW = w > 0 ? w : (h > 0 ? h * ar : st.w);
     let nw = Math.round(baseW);
@@ -184,6 +186,10 @@ function createWindowState({ screen, fs, posPath, defaults, log }) {
   // ── 写 ──────────────────────────────────────────────────
   /** 设置目标尺寸；返回是否真的变了 */
   function setSize(w, h) {
+    if (!Number.isFinite(w) || !Number.isFinite(h)) {
+      logger('[geo] 忽略非法尺寸', String(w), String(h));
+      return false;
+    }
     // 漫游模式下窗口必须铺满屏幕，任何缩小都会让她被裁掉（踩过：滚轮把窗口缩到 1200x644）
     if (st.roam) {
       logger('[geo] 漫游中忽略改尺寸请求', w + 'x' + h);
@@ -192,13 +198,20 @@ function createWindowState({ screen, fs, posPath, defaults, log }) {
     const s = clampSize(w, h);
     if (s.w === st.w && s.h === st.h) return false;
     const before = st.w + 'x' + st.h;
+    // ── 缩放时锚定「底边」────────────────────────────────────
+    // 合成器在窗口缩小的瞬间会先显示"旧画面按新窗口裁剪"的一帧，
+    // 她脚底离窗口底边只有 ~30px，一裁就切到腿（用户看到的"看不见的框"）。
+    // 锚定底边后，窗口是往上收的，裁掉的是头顶上方的空白（那里有 60~110px 余量）。
+    const oldBottom = st.y + st.h;
     st.w = s.w;
     st.h = s.h;
+    st.y = oldBottom - st.h;
     logger('[geo] size', before, '->', st.w + 'x' + st.h);
 
     if (alive()) {
-      const b = win.getBounds();
-      const p = clampPosition(b.x, b.y, st.w, st.h);
+      // 用刚算好的 st.x/st.y（底边锚定后的值）来夹位置。
+      // 以前这里回读 win.getBounds() 再夹，会把锚定算好的 y 覆盖掉 —— 底边就又跑了。
+      const p = clampPosition(st.x, st.y, st.w, st.h);
       st.x = p.x;
       st.y = p.y;
       win.setBounds({ x: st.x, y: st.y, width: st.w, height: st.h });
@@ -208,6 +221,17 @@ function createWindowState({ screen, fs, posPath, defaults, log }) {
 
   /** 移动（拖动用）：坐标对齐设备像素，不改尺寸 */
   function moveTo(x, y, { keepSize = true } = {}) {
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return { x: st.x, y: st.y };
+    // 自愈：基准尺寸被污染成 NaN 时，用窗口真实 bounds 修回来
+    if (!Number.isFinite(st.w) || !Number.isFinite(st.h) || !Number.isFinite(st.x) || !Number.isFinite(st.y)) {
+      if (alive()) {
+        const b = win.getBounds();
+        if (Number.isFinite(b.width) && Number.isFinite(b.height)) {
+          st.w = b.width; st.h = b.height; st.x = b.x; st.y = b.y;
+        }
+      }
+      if (!Number.isFinite(st.w) || !Number.isFinite(st.h)) return { x: st.x, y: st.y };
+    }
     const p = clampPosition(x, y, st.w, st.h);
     st.x = p.x;
     st.y = p.y;

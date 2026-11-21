@@ -539,9 +539,13 @@ function setupIpc() {
       drag.lt = now;
       const g = geo.get();
       const d = screen.getPrimaryDisplay().workAreaSize;
+      // 任何一环变成 NaN 都会让 setBounds 抛 "conversion failure"，主进程弹窗崩掉。
+      // 逐项守住：非有限值这一帧直接跳过。
+      if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(g.w) || !Number.isFinite(g.h)) return;
       const keep = 90;
       const cx = Math.max(-g.w + keep, Math.min(d.width - keep, x));
       const cy = Math.max(0, Math.min(d.height - keep, y));
+      if (!Number.isFinite(cx) || !Number.isFinite(cy)) return;
       dragWrites++;
       geo.moveTo(cx, cy);
       try { win.webContents.send('pet:drag-info', { vx, vy }); } catch (e) {}
